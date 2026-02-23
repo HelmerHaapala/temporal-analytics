@@ -1,0 +1,7 @@
+results
+notebooks
+scripts
+.venv
+.env
+.vscode
+*__pycache__

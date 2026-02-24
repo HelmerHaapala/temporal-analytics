@@ -103,19 +103,19 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # Source data
     parser.add_argument("--n-events", type=int, default=15000) #Total number of events to generate, impacts especially ground truth performance
-    parser.add_argument("--time-span", type=int, default=30) #Time span (in days) over which event_time values are distributed, impacts especially window performance
+    parser.add_argument("--time-span", type=int, default=20) #Time span (in days) over which event_time values are distributed, impacts especially window performance
     parser.add_argument("--anomaly-ratio", type=float, default=0.65) #Total fraction of anomalous events split randomly into delete/late/update
     
     # BATCH_reference
     parser.add_argument("--closed-snapshot-days", type=float, default=1) #Refresh frequency in days
     
     # A_closed_snapshot_warehouse
-    parser.add_argument("--backfill-hot-days", type=float, default=7) #Hot partition window size in days
+    parser.add_argument("--backfill-hot-days", type=float, default=4) #Hot partition window size in days
     parser.add_argument("--backfill-hot-refresh-hours", type=float, default=1) #Hot partition refresh frequency in hours
-    parser.add_argument("--backfill-full-recompute-every-days", type=float, default=14) #Full-history recompute cadence in days
+    parser.add_argument("--backfill-full-recompute-every-days", type=float, default=10) #Full-history recompute cadence in days
     
     # B_open_evolving_stream
-    parser.add_argument("--open-reconcile-every-hours", type=float, default=6) #Reconciliation cadence by arrival time
+    parser.add_argument("--open-reconcile-every-hours", type=float, default=12) #Reconciliation cadence by arrival time
     parser.add_argument("--open-propagation-lag-hours", type=float, default=1) #Visibility lag by arrival time
     
     # C_window_bounded_stream
@@ -123,7 +123,7 @@ if __name__ == "__main__":
     parser.add_argument("--allowed-lateness-days", type=float, default=14) #Allowed lateness, watermark delay from event_time (not arrival)
     
     # E_virtual_semantic_snapshot
-    parser.add_argument("--semantic-refresh-hours", type=float, default=4) #Logical snapshot refresh interval
+    parser.add_argument("--semantic-refresh-hours", type=float, default=6) #Logical snapshot refresh interval
     args = parser.parse_args()
 
     run_case_study(

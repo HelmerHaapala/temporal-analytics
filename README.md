@@ -1,12 +1,14 @@
 ﻿# Temporal Analytics Case Study: Documentation
 
-Anempirical study examining how analytics-layer data modeling changes across four thesis-aligned architectural patterns (A/B/C/E), plus a batch benchmark and a `ground_truth` reference, when batch-based reconstruction is reduced or removed.
+An empirical study examining how analytics-layer data modeling changes when batch-based reconstruction is reduced or removed.
+The observations are made across four thesis-aligned architectural patterns (A/B/C/E), plus a batch benchmark and a `ground_truth` reference. 
 
 ---
 
 ## Overview
 
-This case study implements four thesis-aligned architectures (A/B/C/E), plus a traditional batch benchmark and a `ground_truth` reference, over a synthetic history of operational row changes. The source is treated as a virtualized evolving operational database observed over time, not as a production CDC transport stream. Each architecture represents a different point on the spectrum of temporal correctness, consistency, and stability.
+The source is treated as a virtualized evolving operational database observed over time, not as a production CDC transport stream. 
+Each architecture represents a different point on the spectrum of temporal correctness, consistency, and stability.
 
 ### Core Research Question
 

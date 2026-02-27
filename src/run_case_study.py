@@ -12,6 +12,7 @@ from architectures import (
     BatchReference,
     ClosedSnapshotWithBackfill,
     GroundTruthArchitecture,
+    LogConsistentHTAP,
     OpenEvolvingStream,
     VirtualSemanticSnapshot,
     WindowBoundedStream,
@@ -30,6 +31,7 @@ def run_case_study(
     open_propagation_lag_hours: float,
     window_size_hours: float,
     allowed_lateness_days: float,
+    htap_commit_every_hours: float,
     semantic_refresh_hours: float,
 ):
     print("\nSTART")
@@ -42,6 +44,7 @@ def run_case_study(
         "A_closed_snapshot_warehouse": ClosedSnapshotWithBackfill(hot_partition_days=hot_partition_days,hot_partition_refresh_hours=hot_partition_refresh_hours,full_recompute_every_days=full_recompute_every_days,),
         "B_open_evolving_stream": OpenEvolvingStream(reconcile_every_hours=open_reconcile_every_hours,propagation_lag_hours=open_propagation_lag_hours,),
         "C_window_bounded_stream": WindowBoundedStream(window_size_hours=window_size_hours,allowed_lateness_days=allowed_lateness_days,),
+        "D_log_consistent_htap": LogConsistentHTAP(commit_every_hours=htap_commit_every_hours,),
         "E_virtual_semantic_snapshot": VirtualSemanticSnapshot(semantic_refresh_hours=semantic_refresh_hours,),
     }
 
@@ -119,8 +122,11 @@ if __name__ == "__main__":
     parser.add_argument("--open-propagation-lag-hours", type=float, default=1) #Visibility lag by arrival time
     
     # C_window_bounded_stream
-    parser.add_argument("--window-hours", type=float, default=3) #Window size in hours, ie. micro-batch size
-    parser.add_argument("--allowed-lateness-days", type=float, default=14) #Allowed lateness, watermark delay from event_time (not arrival)
+    parser.add_argument("--window-hours", type=float, default=1) #Window size in hours, ie. micro-batch size
+    parser.add_argument("--allowed-lateness-days", type=float, default=10) #Allowed lateness, watermark delay from event_time (not arrival)
+
+    # D_log_consistent_htap
+    parser.add_argument("--htap-commit-every-hours", type=float, default=2) #Transactional commit snapshot cadence in hours
     
     # E_virtual_semantic_snapshot
     parser.add_argument("--semantic-refresh-hours", type=float, default=6) #Logical snapshot refresh interval
@@ -138,5 +144,6 @@ if __name__ == "__main__":
         open_propagation_lag_hours=args.open_propagation_lag_hours,
         window_size_hours=args.window_hours,
         allowed_lateness_days=args.allowed_lateness_days,
+        htap_commit_every_hours=args.htap_commit_every_hours,
         semantic_refresh_hours=args.semantic_refresh_hours,
     )

@@ -28,6 +28,7 @@ Common CLI parameters (from `src/run_case_study.py`) include:
 - `--open-propagation-lag-hours`
 - `--window-hours`
 - `--allowed-lateness-days`
+- `--htap-commit-every-hours`
 - `--semantic-refresh-hours`
 
 Example:
@@ -46,12 +47,13 @@ python src/run_case_study.py --n-events 100000 --anomaly-ratio 0.30 --window-hou
 ## What It Does
 
 1. Generates synthetic operational change history (counts and anomaly ratio are configurable)
-2. Runs 6 architecture pipelines (5 compared outputs + `ground_truth` reference):
+2. Runs 7 architecture pipelines (6 compared outputs + `ground_truth` reference):
    - **ground_truth**: Reference truth snapshot for deviation comparisons
    - **BATCH_reference**: Traditional full-batch benchmark
    - **A_closed_snapshot_warehouse**: Hot/cold pull-window over virtualized source state
    - **B_open_evolving_stream**: Lagged periodic reconciliation from observed source changes
    - **C_window_bounded_stream**: Event-time windows with watermark finalization
+   - **D_log_consistent_htap**: Observed-change-log analytics served from commit snapshots
    - **E_virtual_semantic_snapshot**: Logical semantic-layer snapshots from observed source changes
 3. Measures 1 value for each architecture:
    - **total_sales**: Baseline control (simple aggregate)

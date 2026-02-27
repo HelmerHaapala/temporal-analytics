@@ -1,7 +1,7 @@
 ﻿# Temporal Analytics Case Study: Documentation
 
 An empirical study examining how analytics-layer data modeling changes when batch-based reconstruction is reduced or removed.
-The observations are made across four thesis-aligned architectural patterns (A/B/C/E), plus a batch benchmark and a `ground_truth` reference. 
+The observations are made across five thesis-aligned architectural patterns (A/B/C/D/E), plus a batch benchmark and a `ground_truth` reference. 
 
 ---
 
@@ -22,6 +22,7 @@ Each architecture represents a different point on the spectrum of temporal corre
 | **A: Closed Snapshot Warehouse** | Hot/cold pull-window with bounded correction horizon | Micro-batch + hot pull window | Selective within hot partition | Medium (policy bounded) |
 | **B: Open Evolving Stream** | Virtualized source + lagged reconciliation | Periodic reconcile checkpoints | Mutable served state | Medium (bounded inconsistency) |
 | **C: Window-Bounded Stream** | Event-time windows on observed source changes | Window + watermark | Finalized windows immutable | Medium (per window) |
+| **D: Log-Consistent HTAP** | Observed-change-log ingestion with commit-snapshot reads | Commit snapshot interval | Log-based revision exposed at commit points | Medium (contract-based) |
 | **E: Virtual Semantic Snapshot** | Logical snapshot via semantic layer over observed source | Logical checkpoint closure | Fully recomputable from source observations | High (deterministic checkpoints) |
 
 Different architectures answer the same question ("what were my sales?") differently:
@@ -29,6 +30,7 @@ Different architectures answer the same question ("what were my sales?") differe
 - **A**: "Sales from deduplicated rows in the hot pull window, while cold state stays fixed"
 - **B**: "Sales from a lagged served state reconciled periodically from observed source changes"
 - **C**: "Sales from observed source changes that fall in windows already finalized by watermark rules"
+- **D**: "Sales from observed-change-log state that is visible only at commit snapshot boundaries"
 - **E**: "Sales from semantic-layer logical snapshot at each checkpoint"
 
 
@@ -136,6 +138,28 @@ This assumption is especially important for Architecture A and for how B/C/E are
 
 ---
 
+### Architecture D: Log-Consistent HTAP
+
+**File**: `src/architectures/log_consistent_htap.py`
+
+**Pattern**: Observed-change-log ingestion with analytical reads constrained by commit snapshots
+
+**Key Characteristics**:
+- Source observations are stored in an append-only transactional log
+- A commit cutoff determines what is visible to analytical queries
+- Commit cutoff advances on a configurable interval (`--htap-commit-every-hours`)
+- Metrics are captured at each observation boundary, but only committed state is visible
+
+**Temporal Semantics**:
+- **Analytical Truth**: Transaction-correct at commit boundaries
+- **Temporal Closure**: Commit snapshot
+- **History Mutability**: Log-based revision (new commits can revise prior visible state)
+- **Semantic Stabilization**: Transaction-log visibility contract
+- **Analytical Abstraction**: Relational analytics over committed transactional state
+- **Semantic Consistency**: Contract-based and stable within each commit interval
+
+---
+
 ### Architecture E: Virtual Semantic Snapshot
 
 **File**: `src/architectures/virtual_semantic_snapshot.py`
@@ -197,4 +221,3 @@ is_deleted         -- Tombstone delete (soft delete)
 - **Late arrivals**: Some events arrive after event_time, with randomized delays
 - **Products/regions**: Fixed small catalogs for reproducibility
 - **Interpretation**: This table emulates an evolving operational source viewed over time; it is not a production transport stream.
-

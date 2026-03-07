@@ -1,61 +1,59 @@
-# Quick Start Guide
+# Quick Start
 
-## Installation
+This file covers the implementation workflow only. Methodological justification and thesis-text framing are documented separately in `results/thesis_assets/implementation_framing_plan.md`.
+
+## 1. Install
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## Run the Case Study
+## 2. Run
 
 ```bash
-python src/run_case_study.py
+python src/run_simulation.py
 ```
 
-This generates synthetic operational change history, runs all architecture pipelines (including the `ground_truth` reference), and records measure snapshots.
+Default arguments:
 
-Source model note: `events_source` emulates a virtualized evolving operational DB observed over time. It is not a production CDC transport stream.
+- `--n-events 10000`
+- `--time-span 95`
+- `--anomaly-ratio 0.65`
+- `--seed 42`
 
-Common CLI parameters (from `src/run_case_study.py`) include:
-- `--n-events`
-- `--time-span`
-- `--anomaly-ratio`
-- `--closed-snapshot-days`
-- `--backfill-hot-days`
-- `--backfill-hot-refresh-hours`
-- `--backfill-full-recompute-every-days`
-- `--open-reconcile-every-hours`
-- `--open-propagation-lag-hours`
-- `--window-hours`
-- `--allowed-lateness-days`
-- `--htap-commit-every-hours`
-- `--semantic-refresh-hours`
+## 3. Key outputs
 
-Example:
+Scenarios mode:
+
+- `results/scenarios_events_source.csv`
+- `results/scenarios_snapshots.csv`
+- `results/scenarios_outcomes.csv`
+- `databases/scenarios_source.duckdb`
+- `parameters/scenarios_tuned_params.json`
+
+Baseline mode:
+
+- `results/baseline_events_source.csv`
+- `results/baseline_snapshots.csv`
+- `results/baseline_outcomes.csv`
+- `databases/baseline_source.duckdb`
+- `parameters/baseline_params.json`
+
+## 4. Thesis figures and tables
 
 ```bash
-python src/run_case_study.py --n-events 100000 --anomaly-ratio 0.30 --window-hours 6
+python scripts/business_scenarios_visualize.py --results-dir results --output-dir results/thesis_assets
 ```
 
-## View Results
+Notes:
 
-**Snapshots file**: `results/measure_snapshots.csv`
-**Source history file**: `results/events_source.csv`
-
-`results/` is generated at runtime and ignored by `.gitignore`.
-
-## What It Does
-
-1. Generates synthetic operational change history (counts and anomaly ratio are configurable)
-2. Runs 7 architecture pipelines (6 compared outputs + `ground_truth` reference):
-   - **ground_truth**: Reference truth snapshot for deviation comparisons
-   - **BATCH_reference**: Traditional full-batch benchmark
-   - **A_closed_snapshot_warehouse**: Hot/cold pull-window over virtualized source state
-   - **B_open_evolving_stream**: Lagged periodic reconciliation from observed source changes
-   - **C_window_bounded_stream**: Event-time windows with watermark finalization
-   - **D_log_consistent_htap**: Observed-change-log analytics served from commit snapshots
-   - **E_virtual_semantic_snapshot**: Logical semantic-layer snapshots from observed source changes
-3. Measures 1 value for each architecture:
-   - **total_sales**: Baseline control (simple aggregate)
-
-
+- `run_simulation.py` always runs both scenario types (scenarios + baseline).
+- Simulation outputs are always written to `results/`.
+- Scenarios mode reuses tuned parameters only when `parameters/scenarios_tuned_params.json` contains a profile matching `n-events`, `time-span`, and `anomaly-ratio`.
+- The published repository currently ships cached scenario profiles for `10000` and `100000` events with `time-span=95` and `anomaly-ratio=0.65`.
+- If the cache is missing scenarios, only missing scenarios are tuned and appended.
+- Scenarios are defined in `src/scenarios/scenario_definitions.py` and include:
+  `S1`, `S2`, `S3`, and `S4`.
+- `processing_time_seconds` is environment-dependent; use it as context, not as primary evidence.
+- Generated thesis assets are indexed in `results/thesis_assets/thesis_outputs.md`.
+- Pass/fail checks use small tolerances, and stability restatements ignore tiny floating-point jitter.

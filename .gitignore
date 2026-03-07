@@ -1,7 +1,8 @@
 results
+databases
 notebooks
-scripts
 .venv
 .env
 .vscode
 *__pycache__
+scripts

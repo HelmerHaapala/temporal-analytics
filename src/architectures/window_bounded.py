@@ -17,27 +17,24 @@ class WindowBoundedStream:
 
     def __init__(
         self,
-        window_size_hours,
-        allowed_lateness_days,
-    ):
+        window_size_hours: float,
+        allowed_lateness_hours: float,
+    ) -> None:
         self.window_size_hours = float(window_size_hours)
         if self.window_size_hours <= 0:
             raise ValueError("window_size_hours must be > 0")
-        self.allowed_lateness_days = float(allowed_lateness_days)
+        self.allowed_lateness_hours = float(allowed_lateness_hours)
         self.conn = duckdb.connect(":memory:")
-        self.ingestion_count = 0
-        # Watermark state
         self.watermark: Optional[pd.Timestamp] = None
         self.max_event_time_seen: Optional[pd.Timestamp] = None
-        # Tables / views
-        self.event_log_table_name = "event_log" #append-only log of all ingested events, with window and finality metadata
-        self.table_name = "served_view" #latest ingested record per sale_id, including open windows, with is_final flag
+        self.event_log_table_name = "event_log"
+        self.table_name = "served_view"
         self.processing_time_seconds = 0.0
-        self._init_tables() #call for table initialization
+        self.rows_loaded_count = 0
+        self.freshness_cutoff_time: Optional[pd.Timestamp] = None
+        self._init_tables()
 
     def _init_tables(self) -> None:
-        #Main event log: all ingested events (open windows + finalized rows)
-        #with an is_final flag that becomes TRUE when watermark closes their window
         self.conn.execute(
             f"""
             CREATE TABLE {self.event_log_table_name} (
@@ -49,7 +46,6 @@ class WindowBoundedStream:
             """
         )
 
-        # Published view: latest ingested record per sale_id, including open windows
         self.conn.execute(
             f"""
             CREATE VIEW {self.table_name} AS
@@ -72,7 +68,6 @@ class WindowBoundedStream:
         )
 
     def _assign_window(self, event_time: pd.Timestamp) -> Tuple[pd.Timestamp, pd.Timestamp]:
-        #Assign a fixed-size tumbling window based on event_time
         ts = event_time.timestamp()
         window_seconds = self.window_size_hours * 3600.0
         window_start_ts = (ts // window_seconds) * window_seconds
@@ -81,16 +76,14 @@ class WindowBoundedStream:
         return window_start, window_end
 
     def _advance_watermark(self, batch_max_event_time: pd.Timestamp) -> None:
-        #Update running max event_time and watermark (non-decreasing)
         if self.max_event_time_seen is None or batch_max_event_time > self.max_event_time_seen:
             self.max_event_time_seen = batch_max_event_time
 
-        new_watermark = self.max_event_time_seen - timedelta(days=self.allowed_lateness_days)
+        new_watermark = self.max_event_time_seen - timedelta(hours=self.allowed_lateness_hours)
         if self.watermark is None or new_watermark > self.watermark:
             self.watermark = new_watermark
 
     def _finalize_closed_windows(self) -> None:
-        #Mark rows in windows closed by the current watermark as final
         self.conn.execute(
             f"""
             UPDATE {self.event_log_table_name}
@@ -101,34 +94,27 @@ class WindowBoundedStream:
         )
 
     def ingest_events(self, events_df: pd.DataFrame) -> None:
-        #Ingest a micro-batch (=events with the same arrival_time)
-        self.ingestion_count += 1
         windowed = events_df.copy()
 
-        #Ensure pandas Timestamps
         windowed["event_time"] = pd.to_datetime(windowed["event_time"])
         windowed["arrival_time"] = pd.to_datetime(windowed["arrival_time"])
+        self.freshness_cutoff_time = pd.Timestamp(windowed["arrival_time"].max())
 
-        #Assign event-time windows
         windowed[["window_start", "window_end"]] = windowed["event_time"].apply(
             lambda et: pd.Series(self._assign_window(pd.Timestamp(et)))
         )
 
-        #Advance watermark using running max event time (not batch max only)
         batch_max_event_time = pd.Timestamp(windowed["event_time"].max())
         self._advance_watermark(batch_max_event_time)
 
-        #Finalize any previously ingested windows that are now closed
         self._finalize_closed_windows()
 
-        #Drop events that belong to already closed windows
         accepted = windowed
         if self.watermark is not None:
             accepted = windowed[windowed["window_end"] > self.watermark].copy()
         if accepted.empty:
             return
 
-        #Insert accepted events into the main log.
         accepted["is_final"] = False
         temp_view = "ingestion_batch"
         self.conn.register(temp_view, accepted)
@@ -149,10 +135,10 @@ class WindowBoundedStream:
                 FROM {temp_view}
                 """
             )
+            self.rows_loaded_count += int(len(accepted))
         finally:
             self.conn.unregister(temp_view)
 
-        #After inserting accepted events, we may be able to finalize them immediately
         self._finalize_closed_windows()
 
     def process_source(
@@ -163,17 +149,13 @@ class WindowBoundedStream:
         arch_name: str,
     ) -> list[dict]:
         start_time = perf_counter()
-       
-        #Main loop
         try:
-            #Read source as virtualized operational observations
-            #one observed row per (sale_id, arrival_time), then process in pull order
             ordered_events = source_conn.execute(observed_events_sql(source_table)).df()
-            if ordered_events.empty: return []
+            if ordered_events.empty:
+                return []
 
             snapshots: list[dict] = []
             cumulative_count = 0
-            #Process all observations visible at each arrival boundary
             for arrival_time, batch in ordered_events.groupby("arrival_time", sort=False):
                 self.ingest_events(batch.reset_index(drop=True))
                 cumulative_count += len(batch)
@@ -187,6 +169,5 @@ class WindowBoundedStream:
                 )
 
             return snapshots
-        
         finally:
             self.processing_time_seconds += perf_counter() - start_time

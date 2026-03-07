@@ -16,10 +16,11 @@ class GroundTruthArchitecture:
         self.conn = duckdb.connect(":memory:")
         self.table_name = "fact_sales"
         self.processing_time_seconds = 0.0
-        self._init_tables() #call for table initialization
+        self.rows_loaded_count = 0
+        self.freshness_cutoff_time: pd.Timestamp | None = None
+        self._init_tables()
 
     def _init_tables(self) -> None:
-        #Create target table
         self.conn.execute(
             f"""
             CREATE TABLE {self.table_name} (
@@ -30,8 +31,7 @@ class GroundTruthArchitecture:
 
     def _apply_event(self, event: dict) -> None:
         placeholders = ", ".join(["?"] * len(EVENT_COLUMNS))
-        
-        #Delete existing row for the sale_id if exists (to apply update/delete)
+
         self.conn.execute(
             f"""
             DELETE FROM {self.table_name}
@@ -39,8 +39,7 @@ class GroundTruthArchitecture:
             """,
             [event["sale_id"]],
         )
-        
-        #Insert the event
+
         self.conn.execute(
             f"""
                 INSERT INTO {self.table_name}
@@ -51,6 +50,7 @@ class GroundTruthArchitecture:
             """,
                 [event[column] for column in EVENT_COLUMNS],
         )
+        self.rows_loaded_count += 1
 
     def process_source(
         self,
@@ -59,13 +59,9 @@ class GroundTruthArchitecture:
         measure_functions: dict,
         arch_name: str,
     ) -> list[dict]:
-
-        #Start clock
         start_time = perf_counter()
-        
         try:
             snapshots: list[dict] = []
-            #fetch all events from source
             ordered_events = source_conn.execute(
                 f"""
                 SELECT
@@ -74,16 +70,16 @@ class GroundTruthArchitecture:
                 ORDER BY arrival_time
                 """
             ).df()
-            if ordered_events.empty: return []
+            if ordered_events.empty:
+                return []
 
-            #iterate over each event and insert/update/delete
             cumulative_count = 0
             for _, row in ordered_events.iterrows():
                 event_dict = row[list(EVENT_COLUMNS)].to_dict()
                 cumulative_count += 1
                 self._apply_event(event_dict)
+                self.freshness_cutoff_time = pd.Timestamp(row["arrival_time"])
 
-                #Measure after every event
                 snapshots.extend(
                     capture_measure_snapshots(
                         architectures={arch_name: self},
@@ -94,7 +90,5 @@ class GroundTruthArchitecture:
                 )
 
             return snapshots
-        
-        #Stop clock
         finally:
             self.processing_time_seconds += perf_counter() - start_time

@@ -1,5 +1,5 @@
 """
-Architecture C: Open Evolving Stream.
+Architecture B: Open Evolving Stream.
 """
 from time import perf_counter
 from typing import Optional
@@ -12,7 +12,7 @@ from ._shared_sql import EVENT_COLUMNS_SQL, EVENT_SCHEMA_SQL, observed_events_sq
 
 
 class OpenEvolvingStream:
-    """Architecture C: Open evolving operational source with lagged periodic reconciliation."""
+    """Architecture B: lagged periodic reconciliation over observed source changes."""
 
     def __init__(
         self,
@@ -21,14 +21,15 @@ class OpenEvolvingStream:
     ):
         self.reconcile_every = pd.Timedelta(hours=max(0.001, float(reconcile_every_hours)))
         self.propagation_lag = pd.Timedelta(hours=max(0.0, float(propagation_lag_hours)))
-        self.ingestion_count = 0
         self.last_reconciled_visible_cutoff: Optional[pd.Timestamp] = None
         self.next_reconcile_time: Optional[pd.Timestamp] = None
         self.conn = duckdb.connect(":memory:")
         self.log_table_name = "event_log"
         self.table_name = "served_state"
         self.processing_time_seconds = 0.0
-        self._init_tables()  #call for table initialization
+        self.rows_loaded_count = 0
+        self.freshness_cutoff_time: Optional[pd.Timestamp] = None
+        self._init_tables()
 
     def _init_tables(self) -> None:
         self.conn.execute(
@@ -82,10 +83,12 @@ class OpenEvolvingStream:
                     FROM served_snapshot_df
                     """
                 )
+                self.rows_loaded_count += int(len(snapshot_df))
             finally:
                 self.conn.unregister("served_snapshot_df")
 
         self.last_reconciled_visible_cutoff = cutoff
+        self.freshness_cutoff_time = cutoff
 
     def _maybe_reconcile(self, batch_arrival_time: pd.Timestamp) -> None:
         current_time = pd.Timestamp(batch_arrival_time)
@@ -111,7 +114,6 @@ class OpenEvolvingStream:
         n_rows = len(events_df)
         staged_events = events_df.copy().reset_index(drop=True)
 
-        self.ingestion_count += n_rows
         temp_view = "ingestion_batch"
         self.conn.register(temp_view, staged_events)
         try:
@@ -123,6 +125,7 @@ class OpenEvolvingStream:
                 FROM {temp_view}
                 """
             )
+            self.rows_loaded_count += int(n_rows)
         finally:
             self.conn.unregister(temp_view)
         batch_arrival_time = pd.Timestamp(staged_events["arrival_time"].max())
@@ -136,13 +139,8 @@ class OpenEvolvingStream:
         measure_functions: dict,
         arch_name: str,
     ) -> list[dict]:
-        # start the clock
         start_time = perf_counter()
-
-        # Main loop
         try:
-            # Read source as virtualized operational observations:
-            # one observed row per (sale_id, arrival_time), then process in pull order.
             ordered_events = source_conn.execute(observed_events_sql(source_table)).df()
             if ordered_events.empty:
                 return []
@@ -150,7 +148,6 @@ class OpenEvolvingStream:
             snapshots: list[dict] = []
             cumulative_count = 0
 
-            # Poll-style ingestion cycle: process all observations visible at each arrival boundary.
             for arrival_time, batch in ordered_events.groupby("arrival_time", sort=False):
                 cumulative_count += self.ingest_events(batch.reset_index(drop=True))
                 snapshots.extend(
@@ -161,20 +158,6 @@ class OpenEvolvingStream:
                         arrival_time=arrival_time,
                     )
                 )
-
-            final_cutoff = self.conn.execute(
-                f"SELECT MAX(arrival_time) FROM {self.log_table_name}"
-            ).fetchone()[0]
-            if final_cutoff is not None:
-                self._reconcile_served_state(pd.Timestamp(final_cutoff))
-            snapshots.extend(
-                capture_measure_snapshots(
-                    architectures={arch_name: self},
-                    measure_functions=measure_functions,
-                    event_count=cumulative_count,
-                    arrival_time=ordered_events.iloc[-1]["arrival_time"],
-                )
-            )
 
             return snapshots
 

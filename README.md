@@ -1,223 +1,112 @@
-﻿# Temporal Analytics Case Study: Documentation
+# Analytics Architecture Simulation
 
-An empirical study examining how analytics-layer data modeling changes when batch-based reconstruction is reduced or removed.
-The observations are made across five thesis-aligned architectural patterns (A/B/C/D/E), plus a batch benchmark and a `ground_truth` reference. 
+This repository implements the analytics architecture simulation used in a thesis on temporal analytics behavior across data architecture patterns.
 
----
+## Documentation split
 
-## Overview
+- This repository documents the `how`: source generation, architecture implementations, scenario execution, evaluation, and asset generation.
+- The thesis documents the `why`: why the simulation was designed this way, why the scenarios were selected, and how the findings are interpreted.
+- The current thesis-facing writing plan lives in `results/thesis_assets/implementation_framing_plan.md`.
 
-The source is treated as a virtualized evolving operational database observed over time, not as a production CDC transport stream. 
-Each architecture represents a different point on the spectrum of temporal correctness, consistency, and stability.
+## Scope
 
-### Core Research Question
+The study compares one reference architecture, five thesis architectures (A-E), and a ground-truth implementation against the same synthetic source history.
 
-**How do choices in temporal semantics (closure, mutability, correctness guarantees) impact analytics results?**
+- `ground_truth`
+- `BATCH_reference`
+- `A_closed_snapshot_warehouse`
+- `B_open_evolving_stream`
+- `C_window_bounded_stream`
+- `D_log_consistent_htap`
+- `E_virtual_semantic_snapshot`
 
-### Key Architectures
+Scenarios are defined in `src/scenarios/scenario_definitions.py`.
 
-| Architecture | Pattern | Temporal Closure | History Mutability | Results Stability |
-|---|---|---|---|---|
-| **BATCH Reference** | Traditional full-batch reload | Batch boundary | Immutable between reloads | High (reference baseline) |
-| **A: Closed Snapshot Warehouse** | Hot/cold pull-window with bounded correction horizon | Micro-batch + hot pull window | Selective within hot partition | Medium (policy bounded) |
-| **B: Open Evolving Stream** | Virtualized source + lagged reconciliation | Periodic reconcile checkpoints | Mutable served state | Medium (bounded inconsistency) |
-| **C: Window-Bounded Stream** | Event-time windows on observed source changes | Window + watermark | Finalized windows immutable | Medium (per window) |
-| **D: Log-Consistent HTAP** | Observed-change-log ingestion with commit-snapshot reads | Commit snapshot interval | Log-based revision exposed at commit points | Medium (contract-based) |
-| **E: Virtual Semantic Snapshot** | Logical snapshot via semantic layer over observed source | Logical checkpoint closure | Fully recomputable from source observations | High (deterministic checkpoints) |
+Current scenarios:
 
-Different architectures answer the same question ("what were my sales?") differently:
-- **BATCH reference**: "Sales from full deduplicated snapshot at each reload"
-- **A**: "Sales from deduplicated rows in the hot pull window, while cold state stays fixed"
-- **B**: "Sales from a lagged served state reconciled periodically from observed source changes"
-- **C**: "Sales from observed source changes that fall in windows already finalized by watermark rules"
-- **D**: "Sales from observed-change-log state that is visible only at commit snapshot boundaries"
-- **E**: "Sales from semantic-layer logical snapshot at each checkpoint"
+- `S1`: freshness <= 10 minutes, point-in-time accuracy >= 80%
+- `S2`: freshness <= 8 hours, point-in-time accuracy >= 90%
+- `S3`: freshness <= 24 hours, monthly accuracy >= 99%
+- `S4`: freshness <= 6 hours, point-in-time accuracy >= 97%, same-horizon restatement ratio <= 10%
 
+## Metrics
 
----
+The outcome tables track:
 
-## Source Model Assumption
+- Freshness (`freshness_max_minutes`, pass/fail vs target)
+- Point-in-time accuracy (`accuracy_ratio`, pass/fail vs target)
+- Stability (`stability_revision_ratio`, pass/fail vs target)
+- Monthly accuracy when required (`monthly_accuracy`, pass/fail vs target)
+- Load volume (`rows_loaded_count`, `write_amplification`)
+- Runtime context (`processing_time_seconds`)
 
-The source in this case study is modeled as a **virtualized evolving operational database**:
+`rows_loaded_count` is cumulative loaded rows (not distinct rows).
+Pass/fail checks use small numeric tolerances, and stability restatements ignore tiny floating-point jitter.
 
-- Rows evolve over time, and queries observe "latest visible state" at each pull boundary.
-- The generated `events_source` table is a reproducible change-history artifact used to emulate those observations.
-- This is intentionally different from a production CDC stream where every change is delivered as a transport event.
+## Run
 
-This assumption is especially important for Architecture A and for how B/C/E are interpreted:
+Install dependencies:
 
-- **A** models hot/cold pull-window behavior over an operational source, not full-history CDC restatement.
-- **B**, **C**, and **E** ingest ordered source observations (virtualized pull semantics), then apply their own serving/finality policies.
-
----
-
-## Architecture Patterns
-
-### Benchmark: BATCH_reference (Traditional Full Batch)
-
-**File**: `src/architectures/batch.py` (`BatchReference`)
-
-**Pattern**: Full batch warehouse with continuous recomputation every cycle
-
-**Key Characteristics**:
-- Events processed in batches every N events (by arrival time)
-- Full batch recomputation: all events so far are deduplicated and recomputed
-- Once snapshot published, results are immutable within the batch
-- No historical recomputation, each batch cycle represents truth at the time of processing
-
-**Temporal Semantics**:
-- **Analytical Truth**: Snapshot-correct (100% accurate for processed data within batch)
-- **History Mutability**: Immutable snapshots (corrections cause churn between batches, not within)
-- **Semantic Stabilization**: ETL/preprocessing with full recomputation
-- **Analytical Abstraction**: Star schema (dedup events -> fact table -> query)
-- **Semantic Consistency**: Deterministic and repeatable per snapshot
-
-
----
-
-
-### Architecture A: Closed Snapshot Warehouse
-
-**File**: `src/architectures/closed_with_backfill.py`
-
-**Pattern**: Batch pull from virtualized operational source with hot/cold partitioning
-- Source is queried periodically by arrival-time pull boundaries
-- Hot partition is recomputed from latest visible source rows
-- Cold partition remains immutable by policy
-- Hot window size is configurable via `backfill-hot-days`
-
-**Temporal Semantics**:
-- **Analytical Truth**: Snapshot + bounded correction horizon
-- **Temporal Closure**: Micro-batch + hot pull window
-- **Semantic Consistency**: Deterministic per cycle inside policy bounds
-
-
-### Architecture B: Open Evolving Stream
-
-**File**: `src/architectures/open_evolving.py`
-
-**Pattern**: Virtualized operational observations + lagged periodic reconciliation
-
-**Key Characteristics**:
-- Ordered source observations are ingested into an internal log
-- Metrics are served from a periodically reconciled table
-- Reconciliation is configurable by arrival-time cadence
-- Propagation lag delays visibility of newest events
-- Snapshots captured after each source observation boundary (arrival-time order)
-
-**Temporal Semantics**:
-- **Analytical Truth**: Provisional/evolving between reconcile checkpoints
-- **Temporal Closure**: No hard closure during ingestion; checkpoint closure on reconcile
-- **History Mutability**: Served state is mutable at reconcile points
-- **Semantic Stabilization**: Reconcile policy over observed source changes
-- **Analytical Abstraction**: Observation log + lagged served state
-- **Semantic Consistency**: Bounded inconsistency (queries may see partial updates)
-
----
-
-### Architecture C: Window-Bounded Stream
-
-**File**: `src/architectures/window_bounded.py`
-
-**Pattern**: Event-time windowing over virtualized source observations with watermark finalization
-
-**Key Characteristics**:
-- Events assigned to event-time windows (e.g., 1-hour)
-- Watermark tracks event-time progress with grace period
-- Windows before watermark marked final/immutable
-- Source observations targeting already closed windows are dropped
-- Snapshots captured after each source observation boundary (arrival-time order)
-
-**Temporal Semantics**:
-- **Analytical Truth**: Window-correct (accurate within window bounds)
-- **Temporal Closure**: Event-time window + watermark
-- **History Mutability**: Append-only (per window)
-- **Semantic Stabilization**: Engine window semantics
-- **Analytical Abstraction**: Windowed OLAP
-- **Semantic Consistency**: Bounded (window-level)
-
----
-
-### Architecture D: Log-Consistent HTAP
-
-**File**: `src/architectures/log_consistent_htap.py`
-
-**Pattern**: Observed-change-log ingestion with analytical reads constrained by commit snapshots
-
-**Key Characteristics**:
-- Source observations are stored in an append-only transactional log
-- A commit cutoff determines what is visible to analytical queries
-- Commit cutoff advances on a configurable interval (`--htap-commit-every-hours`)
-- Metrics are captured at each observation boundary, but only committed state is visible
-
-**Temporal Semantics**:
-- **Analytical Truth**: Transaction-correct at commit boundaries
-- **Temporal Closure**: Commit snapshot
-- **History Mutability**: Log-based revision (new commits can revise prior visible state)
-- **Semantic Stabilization**: Transaction-log visibility contract
-- **Analytical Abstraction**: Relational analytics over committed transactional state
-- **Semantic Consistency**: Contract-based and stable within each commit interval
-
----
-
-### Architecture E: Virtual Semantic Snapshot
-
-**File**: `src/architectures/virtual_semantic_snapshot.py`
-
-**Pattern**: Logical semantic snapshots over observed operational source changes
-
-**Key Characteristics**:
-- Source observations are loaded as raw operational history
-- Semantic layer exposes latest visible business state as-of a logical cutoff
-- Snapshot cutoff is advanced at configurable checkpoint intervals
-- No physical fact-table rewrite is required for each checkpoint
-
-**Temporal Semantics**:
-- **Analytical Truth**: Snapshot-correct at each logical checkpoint
-- **Temporal Closure**: Logical snapshot cutoff
-- **History Mutability**: Recomputable from observed source history
-- **Semantic Stabilization**: Semantic layer definitions + cutoff contract
-- **Analytical Abstraction**: Virtual semantic snapshot view
-- **Semantic Consistency**: Deterministic and repeatable per checkpoint
-
----
-
-## Measures & Metrics
-
-### Measures (Business Metrics)
-
-The case study computes **1 business measure**:
-
-#### 1. Total Sales
-- **Type**: Simple Aggregate
-- **Calculation**: SUM(amount*quantity)
-- **Grain**: Single row (all events)
-
-## Data Model
-
-### Source Schema
-
-For simplicity, we assume a denormalized source schema with embedded dimensional values.
-
-```sql
-event_id           -- Unique event row identifier
-sale_id            -- Business key (may repeat for corrections)
-event_time         -- When the event occurred (business time)
-arrival_time       -- When the event arrived at system (processing time)
-product_name       -- Picked randomly from a group of possible values
-category           -- The product category in which the product belongs to
-region_name        -- Picked randomly from a group of possible values
-country            -- The country that corresponds to the region
-quantity           -- Units sold
-amount             -- Revenue amount
-is_update          -- Whether this is a correction to prior sale_id
-is_deleted         -- Tombstone delete (soft delete)
+```bash
+pip install -r requirements.txt
 ```
 
-### Synthetic Data Characteristics
-- **Event count**: Configurable via `--n-events`
-- **Update/delete ratio**: Configurable via `--anomaly-ratio` (split across update/delete/late)
-- **Time span**: Configurable via `--time-span`
-- **Late arrivals**: Some events arrive after event_time, with randomized delays
-- **Products/regions**: Fixed small catalogs for reproducibility
-- **Interpretation**: This table emulates an evolving operational source viewed over time; it is not a production transport stream.
+Run the simulation:
+
+```bash
+python src/run_simulation.py
+```
+
+Default arguments:
+
+- `--n-events 10000`
+- `--time-span 95`
+- `--anomaly-ratio 0.65`
+- `--seed 42`
+
+Notes:
+
+- Each run executes both scenario types: scenarios + baseline.
+- Simulation outputs are always written to `results/`.
+- `scenarios` mode reuses tuned parameters only when `parameters/scenarios_tuned_params.json` contains a profile matching `n-events`, `time-span`, and `anomaly-ratio`.
+- The published repository currently ships cached scenario profiles for `10000` and `100000` events with `time-span=95` and `anomaly-ratio=0.65`.
+- If the cache is missing scenarios, only missing scenarios are tuned and then appended to the cache.
+- Tuning chooses the slowest cadence that still meets active targets when a pass candidate exists.
+- A minimum effective `time_span` of 45 days is enforced so monthly evaluation remains meaningful.
+
+## Output Files
+
+Scenarios run:
+
+- `results/scenarios_events_source.csv`
+- `results/scenarios_snapshots.csv`
+- `results/scenarios_outcomes.csv`
+- `databases/scenarios_source.duckdb`
+- `parameters/scenarios_tuned_params.json`
+
+Baseline run:
+
+- `results/baseline_events_source.csv`
+- `results/baseline_snapshots.csv`
+- `results/baseline_outcomes.csv`
+- `databases/baseline_source.duckdb`
+- `parameters/baseline_params.json`
+
+## Thesis Assets
+
+Generate all thesis figures and tables in one run:
+
+```bash
+python scripts/business_scenarios_visualize.py --results-dir results --output-dir results/thesis_assets
+```
+
+Outputs are written under:
+
+- `results/thesis_assets/figures/`
+- `results/thesis_assets/tables/`
+- `results/thesis_assets/thesis_outputs.md` (index of generated assets)
+
+Notes:
+
+- `thesis_outputs.md` is an inventory of generated assets, not a recommendation for which figures belong in the thesis body.
+- The current thesis-body selection plan is documented in `results/thesis_assets/implementation_framing_plan.md`.

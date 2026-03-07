@@ -1,8 +1,5 @@
-"""
-Shared SQL snippets for architectures
-"""
+"""Shared SQL snippets used by architecture implementations."""
 
-#Define schema
 EVENT_SCHEMA_SQL = """
                 event_id BIGINT,
                 sale_id BIGINT,
@@ -13,12 +10,11 @@ EVENT_SCHEMA_SQL = """
                 region_name VARCHAR,
                 country VARCHAR,
                 quantity INTEGER,
-                amount FLOAT,
+                amount DOUBLE,
                 is_update BOOLEAN,
                 is_deleted BOOLEAN
 """
 
-#Column list
 EVENT_COLUMNS = (
     "event_id",
     "sale_id",
@@ -34,11 +30,8 @@ EVENT_COLUMNS = (
     "is_deleted",
 )
 
-#List the columns for a select statement
 EVENT_COLUMNS_SQL = ",\n".join(EVENT_COLUMNS)
 
-#Return a canonical observed-event query in pull order
-#Allows replicating streaming behaviour in an operational database environment
 def observed_events_sql(source_table: str) -> str:
     return f"""
                 SELECT

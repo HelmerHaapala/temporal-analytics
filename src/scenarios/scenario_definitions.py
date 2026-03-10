@@ -21,8 +21,8 @@ class Scenario:
 LEGACY_SCENARIO_ID_MAP = {
     "S1_live_sales_dashboard": "S1",
     "S2_daily_sales_dashboard": "S2",
-    "S3_monthly_management_flash": "S3",
-    "S4_weekly_partner_payout_preview": "S4",
+    "S3_monthly_management_flash": "S4",
+    "S4_weekly_partner_payout_preview": "S3",
 }
 
 
@@ -56,35 +56,36 @@ BUSINESS_SCENARIOS: List[Scenario] = [
     Scenario(
         scenario_id="S2",
         description=(
-            "Daily Sales Dashboard: freshness <= 8 hours; "
-            "point-in-time accuracy >= 90%"
+            "Daily Sales Dashboard: freshness <= 24 hours; "
+            "latest closed 24-hour window accuracy >= 99% after 8 hours"
         ),
-        freshness_target_minutes=8.0 * 60.0,
-        accuracy_target_ratio=0.90,
+        freshness_target_minutes=24.0 * 60.0,
+        accuracy_target_ratio=0.99,
         stability_max_revision_ratio=None,
         monthly_accuracy_target_ratio=None,
     ),
     Scenario(
         scenario_id="S3",
         description=(
-            "Monthly Management Flash: freshness <= 24 hours; "
-            "monthly accuracy >= 99%"
+            "Weekly Partner Payout Preview: freshness <= 7 days; "
+            "latest closed 7-day window accuracy >= 99% after 1 day; "
+            "same-horizon restatement ratio <= 10%"
         ),
-        freshness_target_minutes=24.0 * 60.0,
-        accuracy_target_ratio=None,
-        stability_max_revision_ratio=None,
-        monthly_accuracy_target_ratio=0.99,
+        freshness_target_minutes=7.0 * 24.0 * 60.0,
+        accuracy_target_ratio=0.99,
+        stability_max_revision_ratio=0.10,
+        monthly_accuracy_target_ratio=None,
     ),
     Scenario(
         scenario_id="S4",
         description=(
-            "Weekly Partner Payout Preview: freshness <= 6 hours; "
-            "point-in-time accuracy >= 97%; same-horizon restatement ratio <= 10%"
+            "Formal Monthly Reporting: freshness <= 7 days; "
+            "monthly accuracy >= 99.9%; same-horizon restatement ratio <= 0%"
         ),
-        freshness_target_minutes=6.0 * 60.0,
-        accuracy_target_ratio=0.97,
-        stability_max_revision_ratio=0.10,
-        monthly_accuracy_target_ratio=None,
+        freshness_target_minutes=7.0 * 24.0 * 60.0,
+        accuracy_target_ratio=None,
+        stability_max_revision_ratio=0.0,
+        monthly_accuracy_target_ratio=0.999,
     ),
 ]
 

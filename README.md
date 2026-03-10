@@ -26,9 +26,9 @@ Current simulation scenarios:
 
 - `B0`: baseline reference scenario with fixed architecture parameters and no business targets
 - `S1`: freshness <= 10 minutes, point-in-time accuracy >= 80%
-- `S2`: freshness <= 8 hours, point-in-time accuracy >= 90%
-- `S3`: freshness <= 24 hours, monthly accuracy >= 99%
-- `S4`: freshness <= 6 hours, point-in-time accuracy >= 97%, same-horizon restatement ratio <= 10%
+- `S2`: freshness <= 24 hours, latest closed 24-hour window accuracy >= 99% after 8 hours
+- `S3`: freshness <= 7 days, latest closed 7-day window accuracy >= 99% after 1 day, same-horizon restatement ratio <= 10%
+- `S4`: freshness <= 7 days, monthly accuracy >= 99.9%, same-horizon restatement ratio <= 0%
 
 ## Metrics
 
@@ -42,6 +42,8 @@ The outcome tables track:
 - Runtime context (`processing_time_seconds`)
 
 `rows_loaded_count` is cumulative loaded rows (not distinct rows).
+For `S2`, `accuracy_ratio` is evaluated on the 24-hour event-time window that ended 8 hours before observation, not on the all-time total.
+For `S3`, `accuracy_ratio` is evaluated on the 7-day event-time window that ended 1 day before observation, not on the all-time total.
 Pass/fail checks use small numeric tolerances, and stability restatements ignore tiny floating-point jitter.
 
 ## Run

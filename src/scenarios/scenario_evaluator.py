@@ -43,6 +43,23 @@ def source_last_full_month_truth(
     observation_time: pd.Timestamp,
 ) -> tuple[pd.Timestamp, pd.Timestamp, float, int]:
     month_start, month_end = month_bounds_for_last_full_month(observation_time)
+    total_sales, active_row_count = source_period_truth_as_of(
+        source_conn=source_conn,
+        source_table=source_table,
+        observation_time=observation_time,
+        period_start=month_start,
+        period_end=month_end,
+    )
+    return month_start, month_end, total_sales, active_row_count
+
+
+def source_period_truth_as_of(
+    source_conn,
+    source_table: str,
+    observation_time: pd.Timestamp,
+    period_start: pd.Timestamp,
+    period_end: pd.Timestamp,
+) -> tuple[float, int]:
     result = source_conn.execute(
         f"""
         SELECT
@@ -63,9 +80,9 @@ def source_last_full_month_truth(
           AND event_time >= ?
           AND event_time < ?
         """,
-        [observation_time, month_start, month_end],
+        [observation_time, period_start, period_end],
     ).fetchone()
-    return month_start, month_end, float(result[0]), int(result[1])
+    return float(result[0]), int(result[1])
 
 
 def source_total_truth_as_of(
@@ -232,6 +249,18 @@ def architecture_last_full_month_value(
     month_start: pd.Timestamp,
     month_end: pd.Timestamp,
 ) -> float:
+    return architecture_period_value(
+        arch=arch,
+        period_start=month_start,
+        period_end=month_end,
+    )
+
+
+def architecture_period_value(
+    arch,
+    period_start: pd.Timestamp,
+    period_end: pd.Timestamp,
+) -> float:
     value = arch.conn.execute(
         f"""
         SELECT
@@ -241,7 +270,7 @@ def architecture_last_full_month_value(
           AND event_time >= ?
           AND event_time < ?
         """,
-        [month_start, month_end],
+        [period_start, period_end],
     ).fetchone()[0]
     return float(value)
 
@@ -282,6 +311,29 @@ def evaluate_scenario(
         source_table=source_table,
         observation_time=observation_time,
     )
+    if scenario.scenario_id == "S2":
+        accuracy_period_end = observation_time - pd.Timedelta(hours=8)
+        accuracy_period_start = accuracy_period_end - pd.Timedelta(hours=24)
+        truth_total, _ = source_period_truth_as_of(
+            source_conn=source_conn,
+            source_table=source_table,
+            observation_time=observation_time,
+            period_start=accuracy_period_start,
+            period_end=accuracy_period_end,
+        )
+    elif scenario.scenario_id == "S3":
+        accuracy_period_end = observation_time - pd.Timedelta(days=1)
+        accuracy_period_start = accuracy_period_end - pd.Timedelta(days=7)
+        truth_total, _ = source_period_truth_as_of(
+            source_conn=source_conn,
+            source_table=source_table,
+            observation_time=observation_time,
+            period_start=accuracy_period_start,
+            period_end=accuracy_period_end,
+        )
+    else:
+        accuracy_period_start = None
+        accuracy_period_end = None
 
     month_start = None
     month_end = None
@@ -370,7 +422,14 @@ def evaluate_scenario(
                     max_lag <= (float(scenario.freshness_target_minutes) + FRESHNESS_PASS_EPSILON_MINUTES)
                 )
 
-        arch_total = architecture_total_value(arch)
+        if scenario.scenario_id in {"S2", "S3"}:
+            arch_total = architecture_period_value(
+                arch=arch,
+                period_start=accuracy_period_start,
+                period_end=accuracy_period_end,
+            )
+        else:
+            arch_total = architecture_total_value(arch)
         total_delta = arch_total - truth_total
         if abs(truth_total) <= ZERO_TRUTH_EPSILON:
             total_accuracy = 1.0 if abs(arch_total) <= ZERO_TRUTH_EPSILON else 0.0

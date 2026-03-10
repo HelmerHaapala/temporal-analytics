@@ -52,4 +52,6 @@ Notes:
   `B0`, `S1`, `S2`, `S3`, and `S4`.
 - `processing_time_seconds` is environment-dependent; use it as context, not as primary evidence.
 - Generated thesis assets are indexed in `results/thesis_assets/thesis_outputs.md`.
+- For `S2`, `accuracy_ratio` is evaluated on the closed 24-hour event window after an 8-hour settling delay.
+- For `S3`, `accuracy_ratio` is evaluated on the closed 7-day event window after a 1-day settling delay.
 - Pass/fail checks use small tolerances, and stability restatements ignore tiny floating-point jitter.

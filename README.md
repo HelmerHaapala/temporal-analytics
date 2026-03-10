@@ -69,6 +69,8 @@ Notes:
 
 - Each run executes one shared simulation with `B0` plus `S1`-`S4`.
 - Simulation outputs are always written to `results/`.
+- Tuning and scenario execution both use one hybrid parallelization strategy: scenarios are distributed across worker processes, and each scenario distributes architectures across its own worker pool.
+- The terminal prints scenario x architecture status matrices during both tuning and execution.
 - `B0` always uses one fixed baseline parameter set anchored to the generated source time span and exported to `parameters/baseline_params.json`.
 - `S1`-`S4` reuse tuned parameters only when `parameters/scenarios_tuned_params.json` contains a profile matching `n-events`, `time-span`, and `anomaly-ratio`.
 - The published repository currently ships cached scenario profiles for `10000` and `100000` events with `time-span=95` and `anomaly-ratio=0.65`.

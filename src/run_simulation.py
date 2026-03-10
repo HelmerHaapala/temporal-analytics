@@ -2,10 +2,7 @@
 
 import argparse
 
-from scenarios.simulation_runner import (
-    run_baseline,
-    run_scenarios,
-)
+from scenarios.simulation_runner import run_scenarios
 
 
 def run_simulation(
@@ -16,12 +13,6 @@ def run_simulation(
 ) -> None:
     print("\nSTART")
     run_scenarios(
-        n_events=n_events,
-        time_span=time_span,
-        anomaly_ratio=anomaly_ratio,
-        seed=seed,
-    )
-    run_baseline(
         n_events=n_events,
         time_span=time_span,
         anomaly_ratio=anomaly_ratio,

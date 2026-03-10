@@ -1,6 +1,4 @@
-"""
-Architecture and DuckDB helper functions for simulation scenarios.
-"""
+"""Architecture and DuckDB helper functions for simulation scenarios."""
 
 from typing import Dict
 
@@ -30,29 +28,59 @@ DEFAULT_ARCHITECTURE_PARAMS: Dict[str, float] = {
     "semantic_refresh_hours": 1.0,
 }
 
-BASELINE_ARCHITECTURE_PARAM_OVERRIDES: Dict[str, Dict[str, float]] = {
+BASELINE_ARCHITECTURE_PARAM_OVERRIDES: Dict[str, Dict[str, float | object]] = {
     "ground_truth": {},
     "BATCH_reference": {
-        "closed_snapshot_hours": 24.0,
+        "closed_snapshot_hours": lambda time_span_days: round(
+            max(0.001, float(time_span_days) * 24.0 / 15.0),
+            6,
+        ),
     },
     "A_closed_snapshot_warehouse": {
-        "backfill_hot_hours": 168.0,
-        "backfill_hot_refresh_hours": 4.0,
-        "backfill_full_recompute_every_hours": 336.0,
+        "backfill_hot_hours": lambda time_span_days: round(
+            max(0.001, float(time_span_days) * 24.0 / 20.0),
+            6,
+        ),
+        "backfill_hot_refresh_hours": lambda time_span_days: round(
+            max(0.001, float(time_span_days) * 24.0 / 30.0),
+            6,
+        ),
+        "backfill_full_recompute_every_hours": lambda time_span_days: round(
+            max(0.001, float(time_span_days) * 24.0 / 10.0),
+            6,
+        ),
     },
     "B_open_evolving_stream": {
-        "open_reconcile_every_hours": 6.0,
-        "open_propagation_lag_hours": 1.0,
+        "open_reconcile_every_hours": lambda time_span_days: round(
+            max(0.001, float(time_span_days) * 24.0 / 30.0),
+            6,
+        ),
+        "open_propagation_lag_hours": lambda time_span_days: round(
+            max(0.001, float(time_span_days) * 24.0 / 50.0),
+            6,
+        ),
     },
     "C_window_bounded_stream": {
-        "window_hours": 1.0,
-        "allowed_lateness_hours": 168.0,
+        "window_hours": lambda time_span_days: round(
+            max(0.001, float(time_span_days) * 24.0 / 10.0),
+            6,
+        ),
+        "allowed_lateness_hours": lambda time_span_days: round(
+            max(0.001, float(time_span_days) * 24.0 / 20.0),
+            6,
+        ),
     },
     "D_log_consistent_htap": {
-        "htap_commit_every_hours": 2.0,
+        "htap_commit_every_hours": lambda time_span_days: round(
+            max(0.001, float(time_span_days) * 24.0 / 50.0),
+            6,
+        ),
     },
     "E_virtual_semantic_snapshot": {
-        "semantic_refresh_hours": 6.0,
+        "semantic_refresh_hours": lambda time_span_days: round(
+            max(0.001, float(time_span_days) * 24.0 / 30.0),
+            6,
+        ),
     },
 }
 
@@ -61,9 +89,22 @@ def default_architecture_params() -> Dict[str, float]:
     return DEFAULT_ARCHITECTURE_PARAMS.copy()
 
 
-def baseline_architecture_params(arch_name: str) -> Dict[str, float]:
+def baseline_architecture_params(
+    arch_name: str,
+    time_span_days: float,
+) -> Dict[str, float]:
     params = default_architecture_params()
-    params.update(BASELINE_ARCHITECTURE_PARAM_OVERRIDES.get(arch_name, {}))
+    overrides = BASELINE_ARCHITECTURE_PARAM_OVERRIDES.get(arch_name, {})
+    params.update(
+        {
+            key: (
+                float(value(time_span_days))
+                if callable(value)
+                else float(value)
+            )
+            for key, value in overrides.items()
+        }
+    )
     return params
 
 

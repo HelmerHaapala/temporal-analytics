@@ -1,6 +1,4 @@
-"""
-Scenario model and baseline scenario definitions.
-"""
+"""Scenario model and simulation scenario definitions."""
 
 from dataclasses import dataclass
 from typing import List, Optional
@@ -33,7 +31,17 @@ def normalize_scenario_id(value: object) -> str:
     return LEGACY_SCENARIO_ID_MAP.get(text, text)
 
 
-SCENARIOS: List[Scenario] = [
+BASELINE_SCENARIO = Scenario(
+    scenario_id="B0",
+    description="Baseline reference: fixed architecture parameters; no business targets",
+    freshness_target_minutes=None,
+    accuracy_target_ratio=None,
+    stability_max_revision_ratio=None,
+    monthly_accuracy_target_ratio=None,
+)
+
+
+BUSINESS_SCENARIOS: List[Scenario] = [
     Scenario(
         scenario_id="S1",
         description=(
@@ -79,6 +87,9 @@ SCENARIOS: List[Scenario] = [
         monthly_accuracy_target_ratio=None,
     ),
 ]
+
+
+SCENARIOS: List[Scenario] = [BASELINE_SCENARIO, *BUSINESS_SCENARIOS]
 
 
 ARCHITECTURE_ORDER = [

@@ -1,25 +1,25 @@
 {
   "A_closed_snapshot_warehouse": {
-    "backfill_full_recompute_every_hours": 336.0,
-    "backfill_hot_hours": 168.0,
-    "backfill_hot_refresh_hours": 4.0
+    "backfill_full_recompute_every_hours": 228.0,
+    "backfill_hot_hours": 114.0,
+    "backfill_hot_refresh_hours": 76.0
   },
   "BATCH_reference": {
-    "closed_snapshot_hours": 24.0
+    "closed_snapshot_hours": 152.0
   },
   "B_open_evolving_stream": {
-    "open_propagation_lag_hours": 1.0,
-    "open_reconcile_every_hours": 6.0
+    "open_propagation_lag_hours": 45.6,
+    "open_reconcile_every_hours": 76.0
   },
   "C_window_bounded_stream": {
-    "allowed_lateness_hours": 168.0,
-    "window_hours": 1.0
+    "allowed_lateness_hours": 114.0,
+    "window_hours": 228.0
   },
   "D_log_consistent_htap": {
-    "htap_commit_every_hours": 2.0
+    "htap_commit_every_hours": 45.6
   },
   "E_virtual_semantic_snapshot": {
-    "semantic_refresh_hours": 6.0
+    "semantic_refresh_hours": 76.0
   },
   "ground_truth": {}
 }

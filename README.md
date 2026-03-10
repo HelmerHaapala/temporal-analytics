@@ -22,8 +22,9 @@ The study compares one reference architecture, five thesis architectures (A-E), 
 
 Scenarios are defined in `src/scenarios/scenario_definitions.py`.
 
-Current scenarios:
+Current simulation scenarios:
 
+- `B0`: baseline reference scenario with fixed architecture parameters and no business targets
 - `S1`: freshness <= 10 minutes, point-in-time accuracy >= 80%
 - `S2`: freshness <= 8 hours, point-in-time accuracy >= 90%
 - `S3`: freshness <= 24 hours, monthly accuracy >= 99%
@@ -59,38 +60,34 @@ python src/run_simulation.py
 
 Default arguments:
 
-- `--n-events 10000`
+- `--n-events 100000`
 - `--time-span 95`
 - `--anomaly-ratio 0.65`
 - `--seed 42`
 
 Notes:
 
-- Each run executes both scenario types: scenarios + baseline.
+- Each run executes one shared simulation with `B0` plus `S1`-`S4`.
 - Simulation outputs are always written to `results/`.
-- `scenarios` mode reuses tuned parameters only when `parameters/scenarios_tuned_params.json` contains a profile matching `n-events`, `time-span`, and `anomaly-ratio`.
+- `B0` always uses one fixed baseline parameter set anchored to the generated source time span and exported to `parameters/baseline_params.json`.
+- `S1`-`S4` reuse tuned parameters only when `parameters/scenarios_tuned_params.json` contains a profile matching `n-events`, `time-span`, and `anomaly-ratio`.
 - The published repository currently ships cached scenario profiles for `10000` and `100000` events with `time-span=95` and `anomaly-ratio=0.65`.
-- If the cache is missing scenarios, only missing scenarios are tuned and then appended to the cache.
+- If the cache is missing business scenarios, only the missing scenarios are tuned and then appended to the cache.
 - Tuning chooses the slowest cadence that still meets active targets when a pass candidate exists.
 - A minimum effective `time_span` of 45 days is enforced so monthly evaluation remains meaningful.
 
 ## Output Files
 
-Scenarios run:
+Simulation run:
 
 - `results/scenarios_events_source.csv`
 - `results/scenarios_snapshots.csv`
 - `results/scenarios_outcomes.csv`
 - `databases/scenarios_source.duckdb`
 - `parameters/scenarios_tuned_params.json`
-
-Baseline run:
-
-- `results/baseline_events_source.csv`
-- `results/baseline_snapshots.csv`
-- `results/baseline_outcomes.csv`
-- `databases/baseline_source.duckdb`
 - `parameters/baseline_params.json`
+
+`results/scenarios_outcomes.csv` contains one baseline reference scenario (`B0`) and four business scenarios (`S1`-`S4`).
 
 ## Thesis Assets
 

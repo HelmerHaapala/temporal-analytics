@@ -75,7 +75,7 @@ Notes:
 - The terminal prints scenario x architecture status matrices during both tuning and execution.
 - `B0` always uses one fixed baseline parameter set anchored to the generated source time span and exported to `parameters/baseline_params.json`.
 - `S1`-`S4` reuse tuned parameters only when `parameters/scenarios_tuned_params.json` contains a profile matching `n-events`, `time-span`, and `anomaly-ratio`.
-- The published repository currently ships cached scenario profiles for `10000` and `100000` events with `time-span=95` and `anomaly-ratio=0.65`.
+- The published repository currently ships complete cached scenario profiles for both `10000` and `100000` events, each with `time-span=95` and `anomaly-ratio=0.65`.
 - If the cache is missing business scenarios, only the missing scenarios are tuned and then appended to the cache.
 - Tuning chooses the slowest cadence that still meets active targets when a pass candidate exists.
 - A minimum effective `time_span` of 45 days is enforced so monthly evaluation remains meaningful.
@@ -111,3 +111,5 @@ Notes:
 
 - `thesis_outputs.md` is an inventory of generated assets, not a recommendation for which figures belong in the thesis body.
 - The current thesis-body selection plan is documented in `results/thesis_assets/implementation_framing_plan.md`.
+- Large numeric plot axes use compact formatting such as `K`, `M`, and `B`, and architecture colors are kept consistent across the generated plots.
+- `rows_loaded_count` is emitted as `tables/scenarios/rows_loaded_matrix.*` rather than as a plot because load-volume differences are too large for a readable shared chart.

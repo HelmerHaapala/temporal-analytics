@@ -32,21 +32,21 @@ BASELINE_ARCHITECTURE_PARAM_OVERRIDES: Dict[str, Dict[str, float | object]] = {
     "ground_truth": {},
     "BATCH_reference": {
         "closed_snapshot_hours": lambda time_span_days: round(
-            max(0.001, float(time_span_days) * 24.0 / 15.0),
+            max(0.001, float(time_span_days) * 24.0 / 5.0),
             6,
         ),
     },
     "A_closed_snapshot_warehouse": {
         "backfill_hot_hours": lambda time_span_days: round(
-            max(0.001, float(time_span_days) * 24.0 / 20.0),
+            max(0.001, float(time_span_days) * 24.0 / 15.0),
             6,
         ),
         "backfill_hot_refresh_hours": lambda time_span_days: round(
-            max(0.001, float(time_span_days) * 24.0 / 30.0),
+            max(0.001, float(time_span_days) * 24.0 / 20.0),
             6,
         ),
         "backfill_full_recompute_every_hours": lambda time_span_days: round(
-            max(0.001, float(time_span_days) * 24.0 / 10.0),
+            max(0.001, float(time_span_days) * 24.0 / 2.0),
             6,
         ),
     },

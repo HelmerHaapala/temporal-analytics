@@ -1,11 +1,11 @@
 {
   "A_closed_snapshot_warehouse": {
-    "backfill_full_recompute_every_hours": 228.0,
-    "backfill_hot_hours": 114.0,
-    "backfill_hot_refresh_hours": 76.0
+    "backfill_full_recompute_every_hours": 1140.0,
+    "backfill_hot_hours": 152.0,
+    "backfill_hot_refresh_hours": 114.0
   },
   "BATCH_reference": {
-    "closed_snapshot_hours": 152.0
+    "closed_snapshot_hours": 456.0
   },
   "B_open_evolving_stream": {
     "open_propagation_lag_hours": 45.6,

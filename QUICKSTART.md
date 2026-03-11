@@ -46,7 +46,7 @@ Notes:
 - The terminal prints scenario x architecture status matrices during both tuning and execution.
 - `B0` always uses one fixed baseline parameter set anchored to the generated source time span and exported to `parameters/baseline_params.json`.
 - `S1`-`S4` reuse tuned parameters only when `parameters/scenarios_tuned_params.json` contains a profile matching `n-events`, `time-span`, and `anomaly-ratio`.
-- The published repository currently ships cached scenario profiles for `10000` and `100000` events with `time-span=95` and `anomaly-ratio=0.65`.
+- The published repository currently ships complete cached scenario profiles for both `10000` and `100000` events, each with `time-span=95` and `anomaly-ratio=0.65`.
 - If the cache is missing business scenarios, only the missing scenarios are tuned and appended.
 - Scenarios are defined in `src/scenarios/scenario_definitions.py` and include:
   `B0`, `S1`, `S2`, `S3`, and `S4`.
@@ -54,4 +54,6 @@ Notes:
 - Generated thesis assets are indexed in `results/thesis_assets/thesis_outputs.md`.
 - For `S2`, `accuracy_ratio` is evaluated on the closed 24-hour event window after an 8-hour settling delay.
 - For `S3`, `accuracy_ratio` is evaluated on the closed 7-day event window after a 1-day settling delay.
+- Large numeric plot axes use compact `K`/`M`/`B` formatting, and architecture colors are consistent across the generated plots.
+- `rows_loaded_count` is generated as `tables/scenarios/rows_loaded_matrix.*` rather than as a plot.
 - Pass/fail checks use small tolerances, and stability restatements ignore tiny floating-point jitter.

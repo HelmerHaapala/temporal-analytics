@@ -21,7 +21,6 @@ from scenarios.scenario_definitions import (
     ARCHITECTURE_ORDER,
     BASELINE_SCENARIO,
     BUSINESS_SCENARIOS,
-    normalize_scenario_id,
 )
 from scenarios.tuning_search import architecture_initial
 from data_generator import TemporalEventGenerator  # noqa: E402
@@ -71,9 +70,15 @@ def _simulation_profile_key(
 
 def _normalize_tuned_scenarios(raw_payload: dict) -> dict:
     return {
-        normalize_scenario_id(scenario_id): params
+        str(scenario_id): params
         for scenario_id, params in raw_payload.items()
     }
+
+
+def _has_complete_cached_architecture_params(raw_params_by_arch: dict) -> bool:
+    if not isinstance(raw_params_by_arch, dict):
+        return False
+    return all(arch_name in raw_params_by_arch for arch_name in ARCHITECTURE_ORDER)
 
 
 def _load_tuned_params_cache(path: Path) -> dict:
@@ -525,7 +530,9 @@ def run_scenarios(
     missing_scenario_ids = [
         scenario.scenario_id
         for scenario in BUSINESS_SCENARIOS
-        if scenario.scenario_id not in tuned_params_by_scenario
+        if not _has_complete_cached_architecture_params(
+            tuned_params_by_scenario.get(scenario.scenario_id, {})
+        )
     ]
 
     if missing_scenario_ids:

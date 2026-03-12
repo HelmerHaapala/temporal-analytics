@@ -17,20 +17,6 @@ class Scenario:
     def require_monthly_accuracy(self) -> bool:
         return self.monthly_accuracy_target_ratio is not None
 
-
-LEGACY_SCENARIO_ID_MAP = {
-    "S1_live_sales_dashboard": "S1",
-    "S2_daily_sales_dashboard": "S2",
-    "S3_monthly_management_flash": "S4",
-    "S4_weekly_partner_payout_preview": "S3",
-}
-
-
-def normalize_scenario_id(value: object) -> str:
-    text = str(value)
-    return LEGACY_SCENARIO_ID_MAP.get(text, text)
-
-
 BASELINE_SCENARIO = Scenario(
     scenario_id="B0",
     description="Baseline reference: fixed architecture parameters; no business targets",
@@ -67,7 +53,7 @@ BUSINESS_SCENARIOS: List[Scenario] = [
     Scenario(
         scenario_id="S3",
         description=(
-            "Weekly Partner Payout Preview: freshness <= 7 days; "
+            "Weekly Partner Payout Report: freshness <= 7 days; "
             "latest closed 7-day window accuracy >= 99% after 1 day; "
             "same-horizon restatement ratio <= 10%"
         ),
@@ -79,7 +65,7 @@ BUSINESS_SCENARIOS: List[Scenario] = [
     Scenario(
         scenario_id="S4",
         description=(
-            "Formal Monthly Reporting: freshness <= 7 days; "
+            "Monthly Management Review: freshness <= 7 days; "
             "monthly accuracy >= 99.9%; same-horizon restatement ratio <= 0%"
         ),
         freshness_target_minutes=7.0 * 24.0 * 60.0,

@@ -12,7 +12,7 @@ from ._shared_sql import EVENT_COLUMNS_SQL, EVENT_SCHEMA_SQL, observed_events_sq
 
 
 class OpenEvolvingStream:
-    """Architecture B: lagged periodic reconciliation over observed source changes."""
+    """Architecture B: lagged incremental reconciliation over observed source changes."""
 
     def __init__(
         self,
@@ -52,40 +52,71 @@ class OpenEvolvingStream:
         if self.last_reconciled_visible_cutoff is not None and cutoff <= self.last_reconciled_visible_cutoff:
             return
 
-        snapshot_df = self.conn.execute(
-            f"""
-            SELECT
-                {EVENT_COLUMNS_SQL}
-            FROM (
-                SELECT
-                    *,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY sale_id
-                        ORDER BY arrival_time DESC, event_id DESC
-                    ) AS rn
+        if self.last_reconciled_visible_cutoff is None:
+            affected_sale_ids_df = self.conn.execute(
+                f"""
+                SELECT DISTINCT sale_id
                 FROM {self.log_table_name}
                 WHERE arrival_time <= ?
-            ) ranked
-            WHERE rn = 1 AND is_deleted = FALSE
-            """,
-            [cutoff],
-        ).df()
+                """,
+                [cutoff],
+            ).df()
+        else:
+            affected_sale_ids_df = self.conn.execute(
+                f"""
+                SELECT DISTINCT sale_id
+                FROM {self.log_table_name}
+                WHERE arrival_time > ? AND arrival_time <= ?
+                """,
+                [self.last_reconciled_visible_cutoff, cutoff],
+            ).df()
 
-        self.conn.execute(f"DELETE FROM {self.table_name}")
-        if not snapshot_df.empty:
-            self.conn.register("served_snapshot_df", snapshot_df)
+        if not affected_sale_ids_df.empty:
+            self.conn.register("affected_sale_ids_df", affected_sale_ids_df)
             try:
                 self.conn.execute(
                     f"""
-                    INSERT INTO {self.table_name}
-                    SELECT
-                        {EVENT_COLUMNS_SQL}
-                    FROM served_snapshot_df
+                    DELETE FROM {self.table_name}
+                    WHERE sale_id IN (SELECT sale_id FROM affected_sale_ids_df)
                     """
                 )
-                self.rows_loaded_count += int(len(snapshot_df))
+
+                latest_visible_df = self.conn.execute(
+                    f"""
+                    SELECT
+                        {EVENT_COLUMNS_SQL}
+                    FROM (
+                        SELECT
+                            *,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY sale_id
+                                ORDER BY arrival_time DESC, event_id DESC
+                            ) AS rn
+                        FROM {self.log_table_name}
+                        WHERE arrival_time <= ?
+                          AND sale_id IN (SELECT sale_id FROM affected_sale_ids_df)
+                    ) ranked
+                    WHERE rn = 1 AND is_deleted = FALSE
+                    """,
+                    [cutoff],
+                ).df()
+
+                if not latest_visible_df.empty:
+                    self.conn.register("latest_visible_df", latest_visible_df)
+                    try:
+                        self.conn.execute(
+                            f"""
+                            INSERT INTO {self.table_name}
+                            SELECT
+                                {EVENT_COLUMNS_SQL}
+                            FROM latest_visible_df
+                            """
+                        )
+                        self.rows_loaded_count += int(len(latest_visible_df))
+                    finally:
+                        self.conn.unregister("latest_visible_df")
             finally:
-                self.conn.unregister("served_snapshot_df")
+                self.conn.unregister("affected_sale_ids_df")
 
         self.last_reconciled_visible_cutoff = cutoff
         self.freshness_cutoff_time = cutoff

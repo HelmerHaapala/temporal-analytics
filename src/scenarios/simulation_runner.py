@@ -31,7 +31,7 @@ RESULTS_DIR = REPO_ROOT / "results"
 PARAMETERS_DIR = REPO_ROOT / "parameters"
 DATABASES_DIR = REPO_ROOT / "databases"
 
-MIN_TIME_SPAN_DAYS_FOR_MONTHLY_EVAL = 45
+MIN_TIME_SPAN_DAYS_FOR_WEEKLY_EVAL = 14
 SCENARIOS_RUN_TYPE = "scenarios"
 
 
@@ -166,19 +166,26 @@ def _append_derived_metrics(
     else:
         augmented["freshness_headroom_minutes"] = None
 
-    if {"accuracy_target_ratio", "accuracy_ratio"}.issubset(augmented.columns):
-        target = pd.to_numeric(augmented["accuracy_target_ratio"], errors="coerce")
-        observed = pd.to_numeric(augmented["accuracy_ratio"], errors="coerce")
-        augmented["accuracy_headroom_ratio"] = observed - target
+    if {"live_accuracy_target_ratio", "live_accuracy_ratio"}.issubset(augmented.columns):
+        target = pd.to_numeric(augmented["live_accuracy_target_ratio"], errors="coerce")
+        observed = pd.to_numeric(augmented["live_accuracy_ratio"], errors="coerce")
+        augmented["live_accuracy_headroom_ratio"] = observed - target
     else:
-        augmented["accuracy_headroom_ratio"] = None
+        augmented["live_accuracy_headroom_ratio"] = None
 
-    if {"monthly_accuracy_target_ratio", "monthly_accuracy"}.issubset(augmented.columns):
-        target = pd.to_numeric(augmented["monthly_accuracy_target_ratio"], errors="coerce")
-        observed = pd.to_numeric(augmented["monthly_accuracy"], errors="coerce")
-        augmented["monthly_accuracy_headroom_ratio"] = observed - target
+    if {"daily_window_accuracy_target_ratio", "daily_window_accuracy_ratio"}.issubset(augmented.columns):
+        target = pd.to_numeric(augmented["daily_window_accuracy_target_ratio"], errors="coerce")
+        observed = pd.to_numeric(augmented["daily_window_accuracy_ratio"], errors="coerce")
+        augmented["daily_window_accuracy_headroom_ratio"] = observed - target
     else:
-        augmented["monthly_accuracy_headroom_ratio"] = None
+        augmented["daily_window_accuracy_headroom_ratio"] = None
+
+    if {"weekly_window_accuracy_target_ratio", "weekly_window_accuracy_ratio"}.issubset(augmented.columns):
+        target = pd.to_numeric(augmented["weekly_window_accuracy_target_ratio"], errors="coerce")
+        observed = pd.to_numeric(augmented["weekly_window_accuracy_ratio"], errors="coerce")
+        augmented["weekly_window_accuracy_headroom_ratio"] = observed - target
+    else:
+        augmented["weekly_window_accuracy_headroom_ratio"] = None
 
     if {"stability_target_revision_ratio", "stability_revision_ratio"}.issubset(augmented.columns):
         target = pd.to_numeric(augmented["stability_target_revision_ratio"], errors="coerce")
@@ -461,7 +468,7 @@ def run_scenarios(
     PARAMETERS_DIR.mkdir(parents=True, exist_ok=True)
     DATABASES_DIR.mkdir(parents=True, exist_ok=True)
     parallel_workers = _parallel_worker_count()
-    effective_time_span = max(int(time_span), MIN_TIME_SPAN_DAYS_FOR_MONTHLY_EVAL)
+    effective_time_span = max(int(time_span), MIN_TIME_SPAN_DAYS_FOR_WEEKLY_EVAL)
     profile_key = _simulation_profile_key(
         n_events=n_events,
         time_span=time_span,
@@ -479,7 +486,7 @@ def run_scenarios(
         print(
             "Adjusted time_span from "
             f"{time_span} to {effective_time_span} days "
-            "to keep monthly scenario evaluation non-trivial."
+            "to keep weekly scenario evaluation non-trivial."
         )
     generator = TemporalEventGenerator(
         n_events=n_events,
@@ -547,7 +554,8 @@ def run_scenarios(
             scenario_count=len(scenarios_to_tune),
         )
         print(
-            "Using tuning mode: full-data, slowest-cadence-first, "
+            "Using tuning mode: full-data, direct-freshness-where-available, "
+            "slowest-candidate-first-for-remaining-search, "
             f"scenario_workers={scenario_workers}, "
             f"architecture_workers={architecture_workers}"
         )

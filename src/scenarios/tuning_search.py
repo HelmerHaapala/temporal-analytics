@@ -16,10 +16,20 @@ from scenarios.architecture_factory import (
 MIN_HOURLY_CADENCE = 0.001
 MAX_HOURLY_CADENCE = 24.0
 MAX_TARGET_CADENCE_CANDIDATES = 5
-BATCH_MIN_HOURS = 0.005 * 24.0
-BATCH_MAX_HOURS = 1.0 * 24.0
-RESCUE_ULTRA_FAST_CADENCE_HOURS = [0.001, 0.005, 0.01, 0.02, 0.05, 0.1]
+BATCH_MIN_HOURS = 1.0 / 60.0
+BATCH_MAX_HOURS = 7.0 * 24.0
 RESCUE_C_ALLOWED_LATENESS_HOURS = [744.0, 1080.0, 2160.0]
+
+
+def _scenario_has_any_accuracy_target(scenario: Any) -> bool:
+    return any(
+        getattr(scenario, field, None) is not None
+        for field in (
+            "live_accuracy_target_ratio",
+            "daily_window_accuracy_target_ratio",
+            "weekly_window_accuracy_target_ratio",
+        )
+    )
 
 
 def architecture_initial(arch_name: str) -> str:
@@ -90,7 +100,27 @@ def _clamp(value: float, min_value: float, max_value: float) -> float:
     return max(min_value, min(max_value, value))
 
 
-def _target_cadence_candidates(target_hours: float) -> List[float]:
+def _scenario_target_hours(scenario: Any) -> float | None:
+    if scenario.freshness_target_minutes is None:
+        return None
+    return max(0.001, float(scenario.freshness_target_minutes) / 60.0)
+
+
+def _fixed_target_hours(
+    target_hours: float | None,
+    *,
+    min_hours: float = MIN_HOURLY_CADENCE,
+    max_hours: float = MAX_HOURLY_CADENCE,
+) -> float | None:
+    if target_hours is None:
+        return None
+    return round(_clamp(float(target_hours), min_hours, max_hours), 6)
+
+
+def _target_cadence_candidates(
+    target_hours: float,
+    max_hours: float = MAX_HOURLY_CADENCE,
+) -> List[float]:
     anchors = [0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 24.0]
     scaled = [
         target_hours * 0.5,
@@ -101,7 +131,7 @@ def _target_cadence_candidates(target_hours: float) -> List[float]:
     ]
     pool = sorted(
         {
-            round(_clamp(float(v), MIN_HOURLY_CADENCE, MAX_HOURLY_CADENCE), 6)
+            round(_clamp(float(v), MIN_HOURLY_CADENCE, max_hours), 6)
             for v in anchors + scaled
         }
     )
@@ -122,11 +152,7 @@ def _rescue_candidates_for_architecture(
     arch_name: str,
 ) -> List[Dict[str, float]]:
     base = default_architecture_params()
-    target_hours = (
-        max(0.001, float(scenario.freshness_target_minutes) / 60.0)
-        if scenario.freshness_target_minutes is not None
-        else None
-    )
+    target_hours = _scenario_target_hours(scenario)
     candidates: List[Dict[str, float]] = []
 
     def add_candidate(changes: Dict[str, float]) -> None:
@@ -151,23 +177,6 @@ def _rescue_candidates_for_architecture(
                     }
                 )
 
-    elif arch_name == "B_open_evolving_stream":
-        for h in RESCUE_ULTRA_FAST_CADENCE_HOURS:
-            add_candidate(
-                {
-                    "open_reconcile_every_hours": h,
-                    "open_propagation_lag_hours": 0.0,
-                }
-            )
-
-    elif arch_name == "D_log_consistent_htap":
-        for h in RESCUE_ULTRA_FAST_CADENCE_HOURS:
-            add_candidate({"htap_commit_every_hours": h})
-
-    elif arch_name == "E_virtual_semantic_snapshot":
-        for h in RESCUE_ULTRA_FAST_CADENCE_HOURS:
-            add_candidate({"semantic_refresh_hours": h})
-
     return _dedupe_param_sets(candidates)
 
 
@@ -180,92 +189,104 @@ def tuning_candidates_for_architecture(
         return [base]
 
     candidates: List[Dict[str, float]] = []
-    target_hours = (
-        max(0.001, float(scenario.freshness_target_minutes) / 60.0)
-        if scenario.freshness_target_minutes is not None
-        else None
-    )
+    target_hours = _scenario_target_hours(scenario)
 
     def add_candidate(changes: Dict[str, float]) -> None:
         new_params = base.copy()
         new_params.update(changes)
         candidates.append(new_params)
 
+    if arch_name == "BATCH_reference":
+        fixed_hours = _fixed_target_hours(
+            target_hours,
+            min_hours=BATCH_MIN_HOURS,
+            max_hours=BATCH_MAX_HOURS,
+        )
+        if fixed_hours is not None:
+            add_candidate({"closed_snapshot_hours": fixed_hours})
+        else:
+            for h in _non_target_cadence_candidates():
+                hours = _clamp(h, BATCH_MIN_HOURS, BATCH_MAX_HOURS)
+                add_candidate({"closed_snapshot_hours": round(hours, 6)})
+        return _dedupe_param_sets(candidates)
+
     cadence_hours = (
         _target_cadence_candidates(target_hours)
         if target_hours is not None
         else _non_target_cadence_candidates()
     )
+    fixed_hours = _fixed_target_hours(
+        target_hours,
+        max_hours=max(MAX_HOURLY_CADENCE, target_hours or MAX_HOURLY_CADENCE),
+    )
 
-    if arch_name == "BATCH_reference":
-        for h in cadence_hours:
-            hours = _clamp(h, BATCH_MIN_HOURS, BATCH_MAX_HOURS)
-            add_candidate({"closed_snapshot_hours": round(hours, 6)})
-
-    elif arch_name == "A_closed_snapshot_warehouse":
-        for h in cadence_hours:
-            add_candidate({"backfill_hot_refresh_hours": h})
-        fastest = min(cadence_hours)
-        add_candidate({"backfill_hot_refresh_hours": fastest, "backfill_hot_hours": 48.0})
-        add_candidate({"backfill_hot_refresh_hours": fastest, "backfill_full_recompute_every_hours": 24.0})
-        if scenario.monthly_accuracy_target_ratio is not None:
-            add_candidate({"backfill_hot_refresh_hours": fastest, "backfill_hot_hours": 168.0})
+    if arch_name == "A_closed_snapshot_warehouse":
+        refresh_hours = fixed_hours
+        if refresh_hours is None:
+            for h in cadence_hours:
+                add_candidate({"backfill_hot_refresh_hours": h})
+            refresh_hours = min(cadence_hours)
+        else:
+            add_candidate({"backfill_hot_refresh_hours": refresh_hours})
+        add_candidate({"backfill_hot_refresh_hours": refresh_hours, "backfill_hot_hours": 48.0})
+        add_candidate({"backfill_hot_refresh_hours": refresh_hours, "backfill_full_recompute_every_hours": 24.0})
+        if scenario.require_weekly_window_accuracy:
+            add_candidate({"backfill_hot_refresh_hours": refresh_hours, "backfill_hot_hours": 168.0})
             add_candidate(
                 {
-                    "backfill_hot_refresh_hours": fastest,
+                    "backfill_hot_refresh_hours": refresh_hours,
                     "backfill_hot_hours": 168.0,
                     "backfill_full_recompute_every_hours": 12.0,
                 }
             )
 
     elif arch_name == "B_open_evolving_stream":
-        for h in cadence_hours:
-            add_candidate(
-                {
-                    "open_reconcile_every_hours": h,
-                    "open_propagation_lag_hours": 0.0,
-                }
-            )
-        if target_hours is not None:
-            add_candidate(
-                {
-                    "open_reconcile_every_hours": max(MIN_HOURLY_CADENCE, target_hours),
-                    "open_propagation_lag_hours": max(0.0, min(0.5, target_hours * 0.25)),
-                }
-            )
-        if scenario.monthly_accuracy_target_ratio is not None:
-            for h in RESCUE_ULTRA_FAST_CADENCE_HOURS:
+        reconcile_hours = fixed_hours
+        if reconcile_hours is None:
+            for h in cadence_hours:
                 add_candidate(
                     {
                         "open_reconcile_every_hours": h,
                         "open_propagation_lag_hours": 0.0,
                     }
                 )
+            reconcile_hours = min(cadence_hours)
+        else:
+            add_candidate(
+                {
+                    "open_reconcile_every_hours": reconcile_hours,
+                    "open_propagation_lag_hours": 0.0,
+                }
+            )
+        if reconcile_hours is not None:
+            add_candidate(
+                {
+                    "open_reconcile_every_hours": reconcile_hours,
+                    "open_propagation_lag_hours": max(0.0, min(0.5, reconcile_hours * 0.25)),
+                }
+            )
 
     elif arch_name == "C_window_bounded_stream":
         for h in cadence_hours:
             add_candidate({"window_hours": h})
         fastest = min(cadence_hours)
         add_candidate({"window_hours": fastest, "allowed_lateness_hours": 744.0})
-        if (
-            scenario.monthly_accuracy_target_ratio is not None
-            or scenario.accuracy_target_ratio is not None
-        ):
+        if _scenario_has_any_accuracy_target(scenario):
             add_candidate({"window_hours": fastest, "allowed_lateness_hours": 1080.0})
             add_candidate({"window_hours": fastest, "allowed_lateness_hours": 2160.0})
 
     elif arch_name == "D_log_consistent_htap":
-        for h in cadence_hours:
-            add_candidate({"htap_commit_every_hours": h})
-        if scenario.monthly_accuracy_target_ratio is not None:
-            for h in RESCUE_ULTRA_FAST_CADENCE_HOURS:
+        if fixed_hours is not None:
+            add_candidate({"htap_commit_every_hours": fixed_hours})
+        else:
+            for h in cadence_hours:
                 add_candidate({"htap_commit_every_hours": h})
 
     elif arch_name == "E_virtual_semantic_snapshot":
-        for h in cadence_hours:
-            add_candidate({"semantic_refresh_hours": h})
-        if scenario.monthly_accuracy_target_ratio is not None:
-            for h in RESCUE_ULTRA_FAST_CADENCE_HOURS:
+        if fixed_hours is not None:
+            add_candidate({"semantic_refresh_hours": fixed_hours})
+        else:
+            for h in cadence_hours:
                 add_candidate({"semantic_refresh_hours": h})
 
     return _dedupe_param_sets(candidates)
@@ -275,12 +296,14 @@ def outcome_passes_target(scenario: Any, row: Dict[str, object]) -> bool:
     checks = []
     if scenario.freshness_target_minutes is not None:
         checks.append(bool(row.get("freshness_pass")))
-    if scenario.accuracy_target_ratio is not None:
-        checks.append(bool(row.get("accuracy_pass")))
+    if scenario.live_accuracy_target_ratio is not None:
+        checks.append(bool(row.get("live_accuracy_pass")))
+    if scenario.daily_window_accuracy_target_ratio is not None:
+        checks.append(bool(row.get("daily_window_accuracy_pass")))
+    if scenario.weekly_window_accuracy_target_ratio is not None:
+        checks.append(bool(row.get("weekly_window_accuracy_pass")))
     if scenario.stability_max_revision_ratio is not None:
         checks.append(bool(row.get("stability_pass")))
-    if scenario.monthly_accuracy_target_ratio is not None:
-        checks.append(bool(row.get("monthly_pass")))
     return all(checks) if checks else True
 
 
@@ -292,24 +315,30 @@ def outcome_unmet_gap(scenario: Any, row: Dict[str, object]) -> float:
             gap += float("inf")
         else:
             gap += max(0.0, float(freshness) - float(scenario.freshness_target_minutes))
-    if scenario.accuracy_target_ratio is not None:
-        accuracy = row.get("accuracy_ratio")
+    if scenario.live_accuracy_target_ratio is not None:
+        accuracy = row.get("live_accuracy_ratio")
         if accuracy is None or pd.isna(accuracy):
             gap += float("inf")
         else:
-            gap += max(0.0, float(scenario.accuracy_target_ratio) - float(accuracy))
+            gap += max(0.0, float(scenario.live_accuracy_target_ratio) - float(accuracy))
+    if scenario.daily_window_accuracy_target_ratio is not None:
+        accuracy = row.get("daily_window_accuracy_ratio")
+        if accuracy is None or pd.isna(accuracy):
+            gap += float("inf")
+        else:
+            gap += max(0.0, float(scenario.daily_window_accuracy_target_ratio) - float(accuracy))
+    if scenario.weekly_window_accuracy_target_ratio is not None:
+        accuracy = row.get("weekly_window_accuracy_ratio")
+        if accuracy is None or pd.isna(accuracy):
+            gap += float("inf")
+        else:
+            gap += max(0.0, float(scenario.weekly_window_accuracy_target_ratio) - float(accuracy))
     if scenario.stability_max_revision_ratio is not None:
         stability = row.get("stability_revision_ratio")
         if stability is None or pd.isna(stability):
             gap += float("inf")
         else:
             gap += max(0.0, float(stability) - float(scenario.stability_max_revision_ratio))
-    if scenario.monthly_accuracy_target_ratio is not None:
-        monthly_delta = row.get("monthly_delta")
-        if monthly_delta is None or pd.isna(monthly_delta):
-            gap += float("inf")
-        else:
-            gap += abs(float(monthly_delta))
     return gap
 
 

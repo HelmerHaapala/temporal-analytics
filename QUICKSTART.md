@@ -1,7 +1,3 @@
-# Quick Start
-
-This file covers the implementation workflow only. Methodological justification and thesis-text framing are documented separately in `results/thesis_assets/implementation_framing_plan.md`.
-
 ## 1. Install
 
 ```bash
@@ -21,7 +17,15 @@ Default arguments:
 - `--anomaly-ratio 0.65`
 - `--seed 42`
 
-## 3. Key outputs
+## 3. Business scenarios
+
+- `S1`: Live Sales Dashboard
+- `S2`: Hourly Sales Dashboard
+- `S3`: Daily Sales Dashboard
+- `S4`: Weekly Management Review
+- `S5`: Combined Requirements
+
+## 4. Key outputs
 
 Simulation outputs:
 
@@ -31,4 +35,3 @@ Simulation outputs:
 - `databases/scenarios_source.duckdb`
 - `parameters/scenarios_tuned_params.json`
 - `parameters/baseline_params.json`
-

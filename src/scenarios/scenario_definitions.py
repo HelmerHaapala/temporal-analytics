@@ -9,21 +9,30 @@ class Scenario:
     scenario_id: str
     description: str
     freshness_target_minutes: Optional[float]
-    accuracy_target_ratio: Optional[float]
-    stability_max_revision_ratio: Optional[float]
-    monthly_accuracy_target_ratio: Optional[float]
+    live_accuracy_target_ratio: Optional[float] = None
+    daily_window_accuracy_target_ratio: Optional[float] = None
+    daily_window_accuracy_delay_hours: Optional[float] = None
+    weekly_window_accuracy_target_ratio: Optional[float] = None
+    weekly_window_accuracy_delay_hours: Optional[float] = None
+    stability_max_revision_ratio: Optional[float] = None
 
     @property
-    def require_monthly_accuracy(self) -> bool:
-        return self.monthly_accuracy_target_ratio is not None
+    def require_live_accuracy(self) -> bool:
+        return self.live_accuracy_target_ratio is not None
+
+    @property
+    def require_daily_window_accuracy(self) -> bool:
+        return self.daily_window_accuracy_target_ratio is not None
+
+    @property
+    def require_weekly_window_accuracy(self) -> bool:
+        return self.weekly_window_accuracy_target_ratio is not None
 
 BASELINE_SCENARIO = Scenario(
     scenario_id="B0",
     description="Baseline reference: fixed architecture parameters; no business targets",
     freshness_target_minutes=None,
-    accuracy_target_ratio=None,
     stability_max_revision_ratio=None,
-    monthly_accuracy_target_ratio=None,
 )
 
 
@@ -32,46 +41,58 @@ BUSINESS_SCENARIOS: List[Scenario] = [
         scenario_id="S1",
         description=(
             "Live Sales Dashboard: freshness <= 10 minutes; "
-            "point-in-time accuracy >= 80%"
+            "live point-in-time accuracy >= 60%"
         ),
         freshness_target_minutes=10.0,
-        accuracy_target_ratio=0.80,
-        stability_max_revision_ratio=None,
-        monthly_accuracy_target_ratio=None,
+        live_accuracy_target_ratio=0.60,
     ),
     Scenario(
         scenario_id="S2",
+        description=(
+            "Hourly Sales Dashboard: freshness <= 1 hour; "
+            "live point-in-time accuracy >= 80%"
+        ),
+        freshness_target_minutes=60.0,
+        live_accuracy_target_ratio=0.80,
+    ),
+    Scenario(
+        scenario_id="S3",
         description=(
             "Daily Sales Dashboard: freshness <= 24 hours; "
             "latest closed 24-hour window accuracy >= 99% after 8 hours"
         ),
         freshness_target_minutes=24.0 * 60.0,
-        accuracy_target_ratio=0.99,
-        stability_max_revision_ratio=None,
-        monthly_accuracy_target_ratio=None,
-    ),
-    Scenario(
-        scenario_id="S3",
-        description=(
-            "Weekly Partner Payout Report: freshness <= 7 days; "
-            "latest closed 7-day window accuracy >= 99% after 1 day; "
-            "same-horizon restatement ratio <= 10%"
-        ),
-        freshness_target_minutes=7.0 * 24.0 * 60.0,
-        accuracy_target_ratio=0.99,
-        stability_max_revision_ratio=0.10,
-        monthly_accuracy_target_ratio=None,
+        daily_window_accuracy_target_ratio=0.99,
+        daily_window_accuracy_delay_hours=8.0,
     ),
     Scenario(
         scenario_id="S4",
         description=(
-            "Monthly Management Review: freshness <= 7 days; "
-            "monthly accuracy >= 99.9%; same-horizon restatement ratio <= 0%"
+            "Weekly Management Review: freshness <= 7 days; "
+            "latest closed 7-day window accuracy >= 99.9%; "
+            "same-horizon restatement ratio <= 0%"
         ),
         freshness_target_minutes=7.0 * 24.0 * 60.0,
-        accuracy_target_ratio=None,
+        weekly_window_accuracy_target_ratio=0.999,
+        weekly_window_accuracy_delay_hours=0.0,
         stability_max_revision_ratio=0.0,
-        monthly_accuracy_target_ratio=0.999,
+    ),
+    Scenario(
+        scenario_id="S5",
+        description=(
+            "Combined Requirements: freshness <= 10 minutes; "
+            "live point-in-time accuracy >= 80%; "
+            "latest closed 24-hour window accuracy >= 99% after 8 hours; "
+            "latest closed 7-day window accuracy >= 99.9%; "
+            "same-horizon restatement ratio <= 0%"
+        ),
+        freshness_target_minutes=10.0,
+        live_accuracy_target_ratio=0.80,
+        daily_window_accuracy_target_ratio=0.99,
+        daily_window_accuracy_delay_hours=8.0,
+        weekly_window_accuracy_target_ratio=0.999,
+        weekly_window_accuracy_delay_hours=0.0,
+        stability_max_revision_ratio=0.0,
     ),
 ]
 

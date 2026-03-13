@@ -31,24 +31,24 @@
           "A_closed_snapshot_warehouse": {
             "backfill_full_recompute_every_hours": 240.0,
             "backfill_hot_hours": 96.0,
-            "backfill_hot_refresh_hours": 24.0
+            "backfill_hot_refresh_hours": 1.0
           },
           "BATCH_reference": {
-            "closed_snapshot_hours": 24.0
+            "closed_snapshot_hours": 1.0
           },
           "B_open_evolving_stream": {
             "open_propagation_lag_hours": 0.0,
-            "open_reconcile_every_hours": 24.0
+            "open_reconcile_every_hours": 1.0
           },
           "C_window_bounded_stream": {
-            "allowed_lateness_hours": 240.0,
-            "window_hours": 24.0
+            "allowed_lateness_hours": 744.0,
+            "window_hours": 0.5
           },
           "D_log_consistent_htap": {
-            "htap_commit_every_hours": 24.0
+            "htap_commit_every_hours": 1.0
           },
           "E_virtual_semantic_snapshot": {
-            "semantic_refresh_hours": 24.0
+            "semantic_refresh_hours": 1.0
           },
           "ground_truth": {}
         },
@@ -81,24 +81,49 @@
           "A_closed_snapshot_warehouse": {
             "backfill_full_recompute_every_hours": 240.0,
             "backfill_hot_hours": 96.0,
-            "backfill_hot_refresh_hours": 24.0
+            "backfill_hot_refresh_hours": 168.0
           },
           "BATCH_reference": {
-            "closed_snapshot_hours": 24.0
+            "closed_snapshot_hours": 168.0
           },
           "B_open_evolving_stream": {
             "open_propagation_lag_hours": 0.0,
-            "open_reconcile_every_hours": 24.0
+            "open_reconcile_every_hours": 168.0
           },
           "C_window_bounded_stream": {
-            "allowed_lateness_hours": 1080.0,
-            "window_hours": 1.0
+            "allowed_lateness_hours": 240.0,
+            "window_hours": 24.0
           },
           "D_log_consistent_htap": {
-            "htap_commit_every_hours": 24.0
+            "htap_commit_every_hours": 168.0
           },
           "E_virtual_semantic_snapshot": {
-            "semantic_refresh_hours": 24.0
+            "semantic_refresh_hours": 168.0
+          },
+          "ground_truth": {}
+        },
+        "S5": {
+          "A_closed_snapshot_warehouse": {
+            "backfill_full_recompute_every_hours": 240.0,
+            "backfill_hot_hours": 96.0,
+            "backfill_hot_refresh_hours": 0.166667
+          },
+          "BATCH_reference": {
+            "closed_snapshot_hours": 0.166667
+          },
+          "B_open_evolving_stream": {
+            "open_propagation_lag_hours": 0.0,
+            "open_reconcile_every_hours": 0.166667
+          },
+          "C_window_bounded_stream": {
+            "allowed_lateness_hours": 744.0,
+            "window_hours": 0.1
+          },
+          "D_log_consistent_htap": {
+            "htap_commit_every_hours": 0.166667
+          },
+          "E_virtual_semantic_snapshot": {
+            "semantic_refresh_hours": 0.166667
           },
           "ground_truth": {}
         }
@@ -125,7 +150,7 @@
             "open_reconcile_every_hours": 0.166667
           },
           "C_window_bounded_stream": {
-            "allowed_lateness_hours": 1080.0,
+            "allowed_lateness_hours": 744.0,
             "window_hours": 0.1
           },
           "D_log_consistent_htap": {
@@ -140,24 +165,24 @@
           "A_closed_snapshot_warehouse": {
             "backfill_full_recompute_every_hours": 240.0,
             "backfill_hot_hours": 96.0,
-            "backfill_hot_refresh_hours": 24.0
+            "backfill_hot_refresh_hours": 1.0
           },
           "BATCH_reference": {
-            "closed_snapshot_hours": 24.0
+            "closed_snapshot_hours": 1.0
           },
           "B_open_evolving_stream": {
             "open_propagation_lag_hours": 0.0,
-            "open_reconcile_every_hours": 24.0
+            "open_reconcile_every_hours": 1.0
           },
           "C_window_bounded_stream": {
-            "allowed_lateness_hours": 240.0,
-            "window_hours": 24.0
+            "allowed_lateness_hours": 1080.0,
+            "window_hours": 0.5
           },
           "D_log_consistent_htap": {
-            "htap_commit_every_hours": 24.0
+            "htap_commit_every_hours": 1.0
           },
           "E_virtual_semantic_snapshot": {
-            "semantic_refresh_hours": 24.0
+            "semantic_refresh_hours": 1.0
           },
           "ground_truth": {}
         },
@@ -190,24 +215,49 @@
           "A_closed_snapshot_warehouse": {
             "backfill_full_recompute_every_hours": 240.0,
             "backfill_hot_hours": 96.0,
-            "backfill_hot_refresh_hours": 24.0
+            "backfill_hot_refresh_hours": 168.0
           },
           "BATCH_reference": {
-            "closed_snapshot_hours": 24.0
+            "closed_snapshot_hours": 168.0
           },
           "B_open_evolving_stream": {
             "open_propagation_lag_hours": 0.0,
-            "open_reconcile_every_hours": 24.0
+            "open_reconcile_every_hours": 168.0
+          },
+          "C_window_bounded_stream": {
+            "allowed_lateness_hours": 240.0,
+            "window_hours": 24.0
+          },
+          "D_log_consistent_htap": {
+            "htap_commit_every_hours": 168.0
+          },
+          "E_virtual_semantic_snapshot": {
+            "semantic_refresh_hours": 168.0
+          },
+          "ground_truth": {}
+        },
+        "S5": {
+          "A_closed_snapshot_warehouse": {
+            "backfill_full_recompute_every_hours": 240.0,
+            "backfill_hot_hours": 96.0,
+            "backfill_hot_refresh_hours": 0.166667
+          },
+          "BATCH_reference": {
+            "closed_snapshot_hours": 0.166667
+          },
+          "B_open_evolving_stream": {
+            "open_propagation_lag_hours": 0.0,
+            "open_reconcile_every_hours": 0.166667
           },
           "C_window_bounded_stream": {
             "allowed_lateness_hours": 1080.0,
-            "window_hours": 1.0
+            "window_hours": 0.1
           },
           "D_log_consistent_htap": {
-            "htap_commit_every_hours": 24.0
+            "htap_commit_every_hours": 0.166667
           },
           "E_virtual_semantic_snapshot": {
-            "semantic_refresh_hours": 24.0
+            "semantic_refresh_hours": 0.166667
           },
           "ground_truth": {}
         }

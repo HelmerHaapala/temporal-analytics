@@ -17,42 +17,6 @@ VALUE_CHANGE_EPSILON = 1e-6
 ZERO_TRUTH_EPSILON = 1e-6
 
 
-def month_bounds_for_last_full_month(observation_time: pd.Timestamp) -> tuple[pd.Timestamp, pd.Timestamp]:
-    month_end = pd.Timestamp(observation_time).replace(
-        day=1,
-        hour=0,
-        minute=0,
-        second=0,
-        microsecond=0,
-        nanosecond=0,
-    )
-    month_start = (month_end - pd.DateOffset(months=1)).replace(
-        day=1,
-        hour=0,
-        minute=0,
-        second=0,
-        microsecond=0,
-        nanosecond=0,
-    )
-    return month_start, month_end
-
-
-def source_last_full_month_truth(
-    source_conn,
-    source_table: str,
-    observation_time: pd.Timestamp,
-) -> tuple[pd.Timestamp, pd.Timestamp, float, int]:
-    month_start, month_end = month_bounds_for_last_full_month(observation_time)
-    total_sales, active_row_count = source_period_truth_as_of(
-        source_conn=source_conn,
-        source_table=source_table,
-        observation_time=observation_time,
-        period_start=month_start,
-        period_end=month_end,
-    )
-    return month_start, month_end, total_sales, active_row_count
-
-
 def source_period_truth_as_of(
     source_conn,
     source_table: str,
@@ -244,18 +208,6 @@ def stability_restatement_metrics(arch_rows: pd.DataFrame) -> tuple[int, float, 
     )
 
 
-def architecture_last_full_month_value(
-    arch,
-    month_start: pd.Timestamp,
-    month_end: pd.Timestamp,
-) -> float:
-    return architecture_period_value(
-        arch=arch,
-        period_start=month_start,
-        period_end=month_end,
-    )
-
-
 def architecture_period_value(
     arch,
     period_start: pd.Timestamp,
@@ -287,6 +239,25 @@ def architecture_total_value(arch) -> float:
     return float(value)
 
 
+def accuracy_ratio(truth_value: float, arch_value: float) -> tuple[float, float]:
+    delta = arch_value - truth_value
+    if abs(truth_value) <= ZERO_TRUTH_EPSILON:
+        ratio = 1.0 if abs(arch_value) <= ZERO_TRUTH_EPSILON else 0.0
+    else:
+        ratio = max(0.0, 1.0 - (abs(delta) / abs(truth_value)))
+    return delta, ratio
+
+
+def closed_window_bounds(
+    observation_time: pd.Timestamp,
+    window_hours: float,
+    delay_hours: float,
+) -> tuple[pd.Timestamp, pd.Timestamp]:
+    period_end = observation_time - pd.Timedelta(hours=float(delay_hours))
+    period_start = period_end - pd.Timedelta(hours=float(window_hours))
+    return period_start, period_end
+
+
 def evaluate_scenario(
     scenario: Scenario,
     source_conn,
@@ -306,44 +277,47 @@ def evaluate_scenario(
         source_table=source_table,
         observation_time=observation_time,
     )
-    truth_total = source_total_truth_as_of(
-        source_conn=source_conn,
-        source_table=source_table,
-        observation_time=observation_time,
-    )
-    if scenario.scenario_id == "S2":
-        accuracy_period_end = observation_time - pd.Timedelta(hours=8)
-        accuracy_period_start = accuracy_period_end - pd.Timedelta(hours=24)
-        truth_total, _ = source_period_truth_as_of(
-            source_conn=source_conn,
-            source_table=source_table,
-            observation_time=observation_time,
-            period_start=accuracy_period_start,
-            period_end=accuracy_period_end,
-        )
-    elif scenario.scenario_id == "S3":
-        accuracy_period_end = observation_time - pd.Timedelta(days=1)
-        accuracy_period_start = accuracy_period_end - pd.Timedelta(days=7)
-        truth_total, _ = source_period_truth_as_of(
-            source_conn=source_conn,
-            source_table=source_table,
-            observation_time=observation_time,
-            period_start=accuracy_period_start,
-            period_end=accuracy_period_end,
-        )
-    else:
-        accuracy_period_start = None
-        accuracy_period_end = None
 
-    month_start = None
-    month_end = None
-    truth_monthly = None
-    truth_monthly_row_count = None
-    if scenario.require_monthly_accuracy:
-        month_start, month_end, truth_monthly, truth_monthly_row_count = source_last_full_month_truth(
+    live_truth_value = None
+    if scenario.require_live_accuracy:
+        live_truth_value = source_total_truth_as_of(
             source_conn=source_conn,
             source_table=source_table,
             observation_time=observation_time,
+        )
+
+    daily_window_start = None
+    daily_window_end = None
+    daily_window_truth_value = None
+    if scenario.require_daily_window_accuracy:
+        daily_window_start, daily_window_end = closed_window_bounds(
+            observation_time=observation_time,
+            window_hours=24.0,
+            delay_hours=float(scenario.daily_window_accuracy_delay_hours or 0.0),
+        )
+        daily_window_truth_value, _ = source_period_truth_as_of(
+            source_conn=source_conn,
+            source_table=source_table,
+            observation_time=observation_time,
+            period_start=daily_window_start,
+            period_end=daily_window_end,
+        )
+
+    weekly_window_start = None
+    weekly_window_end = None
+    weekly_window_truth_value = None
+    if scenario.require_weekly_window_accuracy:
+        weekly_window_start, weekly_window_end = closed_window_bounds(
+            observation_time=observation_time,
+            window_hours=7.0 * 24.0,
+            delay_hours=float(scenario.weekly_window_accuracy_delay_hours or 0.0),
+        )
+        weekly_window_truth_value, _ = source_period_truth_as_of(
+            source_conn=source_conn,
+            source_table=source_table,
+            observation_time=observation_time,
+            period_start=weekly_window_start,
+            period_end=weekly_window_end,
         )
 
     for arch_name, arch in architectures.items():
@@ -358,6 +332,30 @@ def evaluate_scenario(
             "freshness_p95_minutes": None,
             "freshness_unserved_points": None,
             "freshness_pass": None,
+            "live_accuracy_target_ratio": scenario.live_accuracy_target_ratio,
+            "live_accuracy_truth_value": live_truth_value,
+            "live_accuracy_arch_value": None,
+            "live_accuracy_delta": None,
+            "live_accuracy_ratio": None,
+            "live_accuracy_pass": None,
+            "daily_window_accuracy_target_ratio": scenario.daily_window_accuracy_target_ratio,
+            "daily_window_accuracy_delay_hours": scenario.daily_window_accuracy_delay_hours,
+            "daily_window_start": daily_window_start,
+            "daily_window_end": daily_window_end,
+            "daily_window_truth_value": daily_window_truth_value,
+            "daily_window_arch_value": None,
+            "daily_window_delta": None,
+            "daily_window_accuracy_ratio": None,
+            "daily_window_accuracy_pass": None,
+            "weekly_window_accuracy_target_ratio": scenario.weekly_window_accuracy_target_ratio,
+            "weekly_window_accuracy_delay_hours": scenario.weekly_window_accuracy_delay_hours,
+            "weekly_window_start": weekly_window_start,
+            "weekly_window_end": weekly_window_end,
+            "weekly_window_truth_value": weekly_window_truth_value,
+            "weekly_window_arch_value": None,
+            "weekly_window_delta": None,
+            "weekly_window_accuracy_ratio": None,
+            "weekly_window_accuracy_pass": None,
             "stability_target_revision_ratio": scenario.stability_max_revision_ratio,
             "stability_same_horizon_transitions": None,
             "stability_revision_count": None,
@@ -366,23 +364,7 @@ def evaluate_scenario(
             "stability_evaluable": None,
             "stability_total_abs_change": None,
             "stability_max_abs_change": None,
-            "accuracy_target_ratio": scenario.accuracy_target_ratio,
-            "accuracy_truth_value": truth_total,
-            "accuracy_arch_value": None,
-            "accuracy_delta": None,
-            "accuracy_ratio": None,
-            "accuracy_pass": None,
-            "monthly_accuracy_target_ratio": scenario.monthly_accuracy_target_ratio,
-            "monthly_truth_value": truth_monthly,
-            "monthly_truth_row_count": truth_monthly_row_count,
-            "monthly_evaluable": None,
-            "monthly_arch_value": None,
-            "monthly_delta": None,
-            "monthly_accuracy": None,
-            "monthly_pass": None,
             "observation_time": observation_time,
-            "last_full_month_start": month_start,
-            "last_full_month_end": month_end,
         }
 
         total_sales_rows = metric_rows_for_architecture(by_arch, arch_name, metric_name="total_sales")
@@ -396,7 +378,6 @@ def evaluate_scenario(
                 max_abs_change,
                 transition_count,
             ) = stability_restatement_metrics(arch_rows)
-
             outcome["stability_same_horizon_transitions"] = transition_count
             outcome["stability_revision_count"] = revision_count
             outcome["stability_revision_ratio"] = revision_ratio
@@ -404,8 +385,7 @@ def evaluate_scenario(
             outcome["stability_max_abs_change"] = max_abs_change
             outcome["stability_evaluable"] = True
             outcome["stability_pass"] = (
-                outcome["stability_revision_ratio"]
-                <= (float(scenario.stability_max_revision_ratio) + STABILITY_PASS_EPSILON)
+                revision_ratio <= (float(scenario.stability_max_revision_ratio) + STABILITY_PASS_EPSILON)
             )
 
         if not arch_rows.empty:
@@ -422,50 +402,43 @@ def evaluate_scenario(
                     max_lag <= (float(scenario.freshness_target_minutes) + FRESHNESS_PASS_EPSILON_MINUTES)
                 )
 
-        if scenario.scenario_id in {"S2", "S3"}:
-            arch_total = architecture_period_value(
-                arch=arch,
-                period_start=accuracy_period_start,
-                period_end=accuracy_period_end,
-            )
-        else:
-            arch_total = architecture_total_value(arch)
-        total_delta = arch_total - truth_total
-        if abs(truth_total) <= ZERO_TRUTH_EPSILON:
-            total_accuracy = 1.0 if abs(arch_total) <= ZERO_TRUTH_EPSILON else 0.0
-        else:
-            total_accuracy = max(0.0, 1.0 - (abs(total_delta) / abs(truth_total)))
-        outcome["accuracy_arch_value"] = arch_total
-        outcome["accuracy_delta"] = total_delta
-        outcome["accuracy_ratio"] = total_accuracy
-        if scenario.accuracy_target_ratio is not None:
-            outcome["accuracy_pass"] = (
-                total_accuracy + ACCURACY_PASS_EPSILON
-            ) >= float(scenario.accuracy_target_ratio)
+        if scenario.require_live_accuracy and live_truth_value is not None:
+            arch_value = architecture_total_value(arch)
+            delta, ratio = accuracy_ratio(live_truth_value, arch_value)
+            outcome["live_accuracy_arch_value"] = arch_value
+            outcome["live_accuracy_delta"] = delta
+            outcome["live_accuracy_ratio"] = ratio
+            outcome["live_accuracy_pass"] = (
+                ratio + ACCURACY_PASS_EPSILON
+            ) >= float(scenario.live_accuracy_target_ratio)
 
-        if scenario.require_monthly_accuracy and truth_monthly is not None:
-            if truth_monthly_row_count is not None and int(truth_monthly_row_count) <= 0:
-                outcome["monthly_evaluable"] = False
-                outcome["monthly_pass"] = False
-            else:
-                arch_value = architecture_last_full_month_value(
-                    arch=arch,
-                    month_start=month_start,
-                    month_end=month_end,
-                )
-                delta = arch_value - truth_monthly
-                if abs(truth_monthly) <= ZERO_TRUTH_EPSILON:
-                    accuracy = 1.0 if abs(arch_value) <= ZERO_TRUTH_EPSILON else 0.0
-                else:
-                    accuracy = max(0.0, 1.0 - (abs(delta) / abs(truth_monthly)))
-                outcome["monthly_evaluable"] = True
-                outcome["monthly_arch_value"] = arch_value
-                outcome["monthly_delta"] = delta
-                outcome["monthly_accuracy"] = accuracy
-                if scenario.monthly_accuracy_target_ratio is not None:
-                    outcome["monthly_pass"] = (
-                        accuracy + ACCURACY_PASS_EPSILON
-                    ) >= float(scenario.monthly_accuracy_target_ratio)
+        if scenario.require_daily_window_accuracy and daily_window_truth_value is not None:
+            arch_value = architecture_period_value(
+                arch=arch,
+                period_start=daily_window_start,
+                period_end=daily_window_end,
+            )
+            delta, ratio = accuracy_ratio(daily_window_truth_value, arch_value)
+            outcome["daily_window_arch_value"] = arch_value
+            outcome["daily_window_delta"] = delta
+            outcome["daily_window_accuracy_ratio"] = ratio
+            outcome["daily_window_accuracy_pass"] = (
+                ratio + ACCURACY_PASS_EPSILON
+            ) >= float(scenario.daily_window_accuracy_target_ratio)
+
+        if scenario.require_weekly_window_accuracy and weekly_window_truth_value is not None:
+            arch_value = architecture_period_value(
+                arch=arch,
+                period_start=weekly_window_start,
+                period_end=weekly_window_end,
+            )
+            delta, ratio = accuracy_ratio(weekly_window_truth_value, arch_value)
+            outcome["weekly_window_arch_value"] = arch_value
+            outcome["weekly_window_delta"] = delta
+            outcome["weekly_window_accuracy_ratio"] = ratio
+            outcome["weekly_window_accuracy_pass"] = (
+                ratio + ACCURACY_PASS_EPSILON
+            ) >= float(scenario.weekly_window_accuracy_target_ratio)
 
         outcomes.append(outcome)
 

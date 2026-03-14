@@ -7,6 +7,7 @@ import duckdb
 import pandas as pd
 
 from measures import capture_measure_snapshots
+from ._row_load_tracking import record_row_loads
 from ._shared_sql import EVENT_SCHEMA_SQL, EVENT_COLUMNS_SQL
 
 
@@ -20,6 +21,7 @@ class BatchReference:
         self.table_name = "fact_sales"
         self.processing_time_seconds = 0.0
         self.rows_loaded_count = 0
+        self.row_load_counts: dict[int, int] = {}
         self.freshness_cutoff_time: pd.Timestamp | None = None
         self._init_tables()
 
@@ -64,6 +66,7 @@ class BatchReference:
                 """
             )
             self.rows_loaded_count += int(len(snapshot_df))
+            record_row_loads(self.row_load_counts, snapshot_df)
 
     def process_source(
         self,
@@ -82,7 +85,7 @@ class BatchReference:
             last_time = pd.Timestamp(maxdatetime)
 
             while current_time <= last_time:
-                batch_time = min(current_time + self.batch_window, last_time)
+                batch_time = min(current_time, last_time)
                 self.recompute_snapshot(
                     source_conn=source_conn,
                     source_table=source_table,

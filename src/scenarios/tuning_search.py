@@ -18,7 +18,6 @@ MAX_HOURLY_CADENCE = 24.0
 MAX_TARGET_CADENCE_CANDIDATES = 5
 BATCH_MIN_HOURS = 1.0 / 60.0
 BATCH_MAX_HOURS = 7.0 * 24.0
-RESCUE_C_ALLOWED_LATENESS_HOURS = [744.0, 1080.0, 2160.0]
 
 
 def _scenario_has_any_accuracy_target(scenario: Any) -> bool:
@@ -169,13 +168,14 @@ def _rescue_candidates_for_architecture(
         # Bias rescue to tighter windows where late finalization is less lossy.
         window_hours = sorted(set(window_pool + [0.1, 0.25, 0.5, 1.0]))[:4]
         for h in window_hours:
-            for lateness in RESCUE_C_ALLOWED_LATENESS_HOURS:
-                add_candidate(
-                    {
-                        "window_hours": h,
-                        "allowed_lateness_hours": lateness,
-                    }
-                )
+            add_candidate(
+                {
+                    "window_hours": h,
+                    "allowed_lateness_hours": -1.0,
+                }
+            )
+    elif arch_name == "D_log_consistent_htap" and _scenario_has_any_accuracy_target(scenario):
+        add_candidate({"htap_commit_every_hours": 0.0})
 
     return _dedupe_param_sets(candidates)
 
@@ -268,12 +268,7 @@ def tuning_candidates_for_architecture(
 
     elif arch_name == "C_window_bounded_stream":
         for h in cadence_hours:
-            add_candidate({"window_hours": h})
-        fastest = min(cadence_hours)
-        add_candidate({"window_hours": fastest, "allowed_lateness_hours": 744.0})
-        if _scenario_has_any_accuracy_target(scenario):
-            add_candidate({"window_hours": fastest, "allowed_lateness_hours": 1080.0})
-            add_candidate({"window_hours": fastest, "allowed_lateness_hours": 2160.0})
+            add_candidate({"window_hours": h, "allowed_lateness_hours": -1.0})
 
     elif arch_name == "D_log_consistent_htap":
         if fixed_hours is not None:
@@ -281,6 +276,8 @@ def tuning_candidates_for_architecture(
         else:
             for h in cadence_hours:
                 add_candidate({"htap_commit_every_hours": h})
+        if scenario.require_live_accuracy:
+            add_candidate({"htap_commit_every_hours": 0.0})
 
     elif arch_name == "E_virtual_semantic_snapshot":
         if fixed_hours is not None:
@@ -357,6 +354,7 @@ def tune_architectures_for_scenario(
     architecture_order: List[str],
     measure_functions: Dict[str, object],
     run_architecture_once_fn: Callable[..., Tuple[pd.DataFrame, Dict[str, object]]],
+    evaluation_context: Dict[str, object] | None = None,
     on_architecture_selected: Callable[[str, str, bool, Dict[str, float]], None] | None = None,
     logger: Callable[[str], None] | None = print,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -400,6 +398,7 @@ def tune_architectures_for_scenario(
                 arch_name=arch_name,
                 params=params,
                 measure_functions=measure_functions,
+                evaluation_context=evaluation_context,
             )
             outcome["tuning_candidate_params"] = json.dumps(
                 arch_only_params(params),

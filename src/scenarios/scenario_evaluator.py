@@ -1,9 +1,7 @@
-"""
-Scenario outcome evaluation utilities.
-"""
+"""Scenario outcome evaluation utilities."""
 
 import json
-from typing import Dict
+from typing import Dict, Optional
 
 import pandas as pd
 
@@ -258,17 +256,11 @@ def closed_window_bounds(
     return period_start, period_end
 
 
-def evaluate_scenario(
+def build_scenario_evaluation_context(
     scenario: Scenario,
     source_conn,
     source_table: str,
-    snapshots_df: pd.DataFrame,
-    architectures: Dict[str, object],
-    architecture_params: Dict[str, Dict[str, float]],
-) -> pd.DataFrame:
-    outcomes = []
-    by_arch = snapshots_df.groupby("architecture")
-
+) -> Dict[str, object]:
     observation_time = pd.Timestamp(
         source_conn.execute(f"SELECT MAX(arrival_time) FROM {source_table}").fetchone()[0]
     )
@@ -277,7 +269,6 @@ def evaluate_scenario(
         source_table=source_table,
         observation_time=observation_time,
     )
-
     live_truth_value = None
     if scenario.require_live_accuracy:
         live_truth_value = source_total_truth_as_of(
@@ -319,6 +310,45 @@ def evaluate_scenario(
             period_start=weekly_window_start,
             period_end=weekly_window_end,
         )
+
+    return {
+        "observation_time": observation_time,
+        "observation_grid": observation_grid,
+        "live_truth_value": live_truth_value,
+        "daily_window_start": daily_window_start,
+        "daily_window_end": daily_window_end,
+        "daily_window_truth_value": daily_window_truth_value,
+        "weekly_window_start": weekly_window_start,
+        "weekly_window_end": weekly_window_end,
+        "weekly_window_truth_value": weekly_window_truth_value,
+    }
+
+
+def evaluate_scenario(
+    scenario: Scenario,
+    source_conn,
+    source_table: str,
+    snapshots_df: pd.DataFrame,
+    architectures: Dict[str, object],
+    architecture_params: Dict[str, Dict[str, float]],
+    evaluation_context: Optional[Dict[str, object]] = None,
+) -> pd.DataFrame:
+    outcomes = []
+    by_arch = snapshots_df.groupby("architecture")
+    context = evaluation_context or build_scenario_evaluation_context(
+        scenario=scenario,
+        source_conn=source_conn,
+        source_table=source_table,
+    )
+    observation_time = pd.Timestamp(context["observation_time"])
+    observation_grid = context["observation_grid"]
+    live_truth_value = context["live_truth_value"]
+    daily_window_start = context["daily_window_start"]
+    daily_window_end = context["daily_window_end"]
+    daily_window_truth_value = context["daily_window_truth_value"]
+    weekly_window_start = context["weekly_window_start"]
+    weekly_window_end = context["weekly_window_end"]
+    weekly_window_truth_value = context["weekly_window_truth_value"]
 
     for arch_name, arch in architectures.items():
         outcome = {

@@ -8,6 +8,7 @@ import duckdb
 import pandas as pd
 
 from measures import capture_measure_snapshots
+from ._row_load_tracking import record_row_loads
 from ._shared_sql import EVENT_COLUMNS, EVENT_COLUMNS_SQL, EVENT_SCHEMA_SQL
 
 
@@ -26,6 +27,7 @@ class ClosedSnapshotWithBackfill:
         self.full_recompute_every_hours = full_recompute_every_hours
         self.processing_time_seconds = 0.0
         self.rows_loaded_count = 0
+        self.row_load_counts: dict[int, int] = {}
         self.freshness_cutoff_time: pd.Timestamp | None = None
         self._init_tables()
 
@@ -66,13 +68,8 @@ class ClosedSnapshotWithBackfill:
             WHERE sale_id IN (SELECT sale_id FROM hot_latest_events)
             """
         )
-        inserted_rows = self.conn.execute(
-            """
-            SELECT COUNT(*)
-            FROM hot_latest_events
-            WHERE is_deleted = FALSE
-            """
-        ).fetchone()[0]
+        inserted_events = hot_latest_df[hot_latest_df["is_deleted"] == False].copy()
+        inserted_rows = len(inserted_events)
         hot_event_columns_sql = ",\n".join(f"hot.{column}" for column in EVENT_COLUMNS)
         self.conn.execute(
             f"""
@@ -84,6 +81,7 @@ class ClosedSnapshotWithBackfill:
             """
         )
         self.rows_loaded_count += int(inserted_rows)
+        record_row_loads(self.row_load_counts, inserted_events)
 
     def process_source(
         self,
@@ -109,7 +107,7 @@ class ClosedSnapshotWithBackfill:
             snapshots: list[dict] = []
 
             while current_start <= last_end:
-                interval_end = current_start + refresh_interval - pd.Timedelta(microseconds=1)
+                interval_end = current_start
 
                 hot_boundary_start = interval_end - hot_window
                 boundary_start = hot_boundary_start if hot_boundary_start > source_start else source_start

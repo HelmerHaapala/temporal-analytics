@@ -8,6 +8,7 @@ import duckdb
 import pandas as pd
 
 from measures import capture_measure_snapshots
+from ._row_load_tracking import record_row_loads
 from ._shared_sql import EVENT_COLUMNS_SQL, EVENT_SCHEMA_SQL, observed_events_sql
 
 
@@ -18,11 +19,12 @@ class LogConsistentHTAP:
         self,
         commit_every_hours: float = 2,
     ):
-        self.commit_every = pd.Timedelta(hours=max(0.001, float(commit_every_hours)))
+        self.commit_every = pd.Timedelta(hours=max(0.0, float(commit_every_hours)))
         self.conn = duckdb.connect(":memory:")
         self.table_name = "committed_snapshot"
         self.processing_time_seconds = 0.0
         self.rows_loaded_count = 0
+        self.row_load_counts: dict[int, int] = {}
         self.freshness_cutoff_time: pd.Timestamp | None = None
         self._init_tables()
 
@@ -99,6 +101,7 @@ class LogConsistentHTAP:
                     """
                 )
                 self.rows_loaded_count += int(len(observed_events))
+                record_row_loads(self.row_load_counts, observed_events)
             finally:
                 self.conn.unregister("observed_events_df")
 
@@ -112,10 +115,12 @@ class LogConsistentHTAP:
                 arrival_ts = pd.Timestamp(arrival_time)
                 cumulative_count += len(batch)
 
-                # Advance commit snapshots up to the current observed arrival boundary.
-                while arrival_ts >= next_commit_time:
-                    self._set_commit_cutoff(next_commit_time)
-                    next_commit_time += self.commit_every
+                # Commit at the current arrival boundary when the cadence is due.
+                if self.commit_every <= pd.Timedelta(0):
+                    self._set_commit_cutoff(arrival_ts)
+                elif arrival_ts >= next_commit_time:
+                    self._set_commit_cutoff(arrival_ts)
+                    next_commit_time = arrival_ts + self.commit_every
 
                 snapshots.extend(
                     capture_measure_snapshots(

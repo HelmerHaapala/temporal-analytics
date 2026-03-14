@@ -8,6 +8,7 @@ import duckdb
 import pandas as pd
 
 from measures import capture_measure_snapshots
+from ._row_load_tracking import record_row_loads
 from ._shared_sql import EVENT_COLUMNS_SQL, EVENT_SCHEMA_SQL, observed_events_sql
 
 
@@ -22,6 +23,7 @@ class VirtualSemanticSnapshot:
         self.table_name = "semantic_snapshot"
         self.processing_time_seconds = 0.0
         self.rows_loaded_count = 0
+        self.row_load_counts: dict[int, int] = {}
         self.freshness_cutoff_time: pd.Timestamp | None = None
         self._init_tables()
 
@@ -99,6 +101,7 @@ class VirtualSemanticSnapshot:
                     """
                 )
                 self.rows_loaded_count += int(len(observed_events))
+                record_row_loads(self.row_load_counts, observed_events)
             finally:
                 self.conn.unregister("observed_events_df")
 
@@ -107,20 +110,17 @@ class VirtualSemanticSnapshot:
             refresh_interval = pd.Timedelta(hours=self.semantic_refresh_hours)
 
             snapshots: list[dict] = []
-            current_start = min_arrival
-            while current_start <= max_arrival:
-                interval_end = current_start + refresh_interval - pd.Timedelta(microseconds=1)
-                if interval_end > max_arrival:
-                    break
-                self._set_snapshot_cutoff(interval_end)
-                
+            snapshot_cutoff = min_arrival
+            while snapshot_cutoff <= max_arrival:
+                self._set_snapshot_cutoff(snapshot_cutoff)
+
                 event_count = self.conn.execute(
                     """
                     SELECT COUNT(*)
                     FROM raw_events
                     WHERE arrival_time <= ?
                     """,
-                    [interval_end],
+                    [snapshot_cutoff],
                 ).fetchone()[0]
 
                 snapshots.extend(
@@ -128,20 +128,10 @@ class VirtualSemanticSnapshot:
                         architectures={arch_name: self},
                         measure_functions=measure_functions,
                         event_count=event_count,
-                        arrival_time=interval_end,
+                        arrival_time=snapshot_cutoff,
                     )
                 )
-                current_start += refresh_interval
-
-            if not snapshots:
-                snapshots.extend(
-                    capture_measure_snapshots(
-                        architectures={arch_name: self},
-                        measure_functions=measure_functions,
-                        event_count=len(observed_events),
-                        arrival_time=max_arrival,
-                    )
-                )
+                snapshot_cutoff += refresh_interval
 
             return snapshots
         finally:

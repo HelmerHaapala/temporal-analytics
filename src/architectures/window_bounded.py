@@ -10,6 +10,7 @@ import duckdb
 import pandas as pd
 
 from measures import capture_measure_snapshots
+from ._row_load_tracking import record_row_loads
 from ._shared_sql import EVENT_COLUMNS_SQL, EVENT_SCHEMA_SQL, observed_events_sql
 
 
@@ -24,6 +25,7 @@ class WindowBoundedStream:
         if self.window_size_hours <= 0:
             raise ValueError("window_size_hours must be > 0")
         self.allowed_lateness_hours = float(allowed_lateness_hours)
+        self.allow_all_late_events = self.allowed_lateness_hours < 0.0
         self.conn = duckdb.connect(":memory:")
         self.watermark: Optional[pd.Timestamp] = None
         self.max_event_time_seen: Optional[pd.Timestamp] = None
@@ -31,6 +33,7 @@ class WindowBoundedStream:
         self.table_name = "served_view"
         self.processing_time_seconds = 0.0
         self.rows_loaded_count = 0
+        self.row_load_counts: dict[int, int] = {}
         self.freshness_cutoff_time: Optional[pd.Timestamp] = None
         self._init_tables()
 
@@ -79,11 +82,17 @@ class WindowBoundedStream:
         if self.max_event_time_seen is None or batch_max_event_time > self.max_event_time_seen:
             self.max_event_time_seen = batch_max_event_time
 
+        if self.allow_all_late_events:
+            self.watermark = None
+            return
+
         new_watermark = self.max_event_time_seen - timedelta(hours=self.allowed_lateness_hours)
         if self.watermark is None or new_watermark > self.watermark:
             self.watermark = new_watermark
 
     def _finalize_closed_windows(self) -> None:
+        if self.watermark is None:
+            return
         self.conn.execute(
             f"""
             UPDATE {self.event_log_table_name}
@@ -136,6 +145,7 @@ class WindowBoundedStream:
                 """
             )
             self.rows_loaded_count += int(len(accepted))
+            record_row_loads(self.row_load_counts, accepted)
         finally:
             self.conn.unregister(temp_view)
 

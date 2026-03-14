@@ -7,6 +7,7 @@ import duckdb
 import pandas as pd
 
 from measures import capture_measure_snapshots
+from ._row_load_tracking import record_row_loads
 from ._shared_sql import EVENT_COLUMNS, EVENT_COLUMNS_SQL, EVENT_SCHEMA_SQL
 
 
@@ -17,6 +18,7 @@ class GroundTruthArchitecture:
         self.table_name = "fact_sales"
         self.processing_time_seconds = 0.0
         self.rows_loaded_count = 0
+        self.row_load_counts: dict[int, int] = {}
         self.freshness_cutoff_time: pd.Timestamp | None = None
         self._init_tables()
 
@@ -51,6 +53,7 @@ class GroundTruthArchitecture:
                 [event[column] for column in EVENT_COLUMNS],
         )
         self.rows_loaded_count += 1
+        record_row_loads(self.row_load_counts, event)
 
     def process_source(
         self,

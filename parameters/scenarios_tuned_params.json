@@ -16,8 +16,8 @@
             "open_reconcile_every_hours": 0.166667
           },
           "C_window_bounded_stream": {
-            "allowed_lateness_hours": 744.0,
-            "window_hours": 0.1
+            "allowed_lateness_hours": -1.0,
+            "window_hours": 0.25
           },
           "D_log_consistent_htap": {
             "htap_commit_every_hours": 0.166667
@@ -41,8 +41,8 @@
             "open_reconcile_every_hours": 1.0
           },
           "C_window_bounded_stream": {
-            "allowed_lateness_hours": 744.0,
-            "window_hours": 0.5
+            "allowed_lateness_hours": -1.0,
+            "window_hours": 1.5
           },
           "D_log_consistent_htap": {
             "htap_commit_every_hours": 1.0
@@ -66,7 +66,7 @@
             "open_reconcile_every_hours": 24.0
           },
           "C_window_bounded_stream": {
-            "allowed_lateness_hours": 240.0,
+            "allowed_lateness_hours": -1.0,
             "window_hours": 24.0
           },
           "D_log_consistent_htap": {
@@ -91,7 +91,7 @@
             "open_reconcile_every_hours": 168.0
           },
           "C_window_bounded_stream": {
-            "allowed_lateness_hours": 240.0,
+            "allowed_lateness_hours": -1.0,
             "window_hours": 24.0
           },
           "D_log_consistent_htap": {
@@ -116,8 +116,8 @@
             "open_reconcile_every_hours": 0.166667
           },
           "C_window_bounded_stream": {
-            "allowed_lateness_hours": 744.0,
-            "window_hours": 0.1
+            "allowed_lateness_hours": -1.0,
+            "window_hours": 0.25
           },
           "D_log_consistent_htap": {
             "htap_commit_every_hours": 0.166667
@@ -150,8 +150,8 @@
             "open_reconcile_every_hours": 0.166667
           },
           "C_window_bounded_stream": {
-            "allowed_lateness_hours": 744.0,
-            "window_hours": 0.1
+            "allowed_lateness_hours": -1.0,
+            "window_hours": 0.25
           },
           "D_log_consistent_htap": {
             "htap_commit_every_hours": 0.166667
@@ -175,8 +175,8 @@
             "open_reconcile_every_hours": 1.0
           },
           "C_window_bounded_stream": {
-            "allowed_lateness_hours": 1080.0,
-            "window_hours": 0.5
+            "allowed_lateness_hours": -1.0,
+            "window_hours": 1.5
           },
           "D_log_consistent_htap": {
             "htap_commit_every_hours": 1.0
@@ -200,7 +200,7 @@
             "open_reconcile_every_hours": 24.0
           },
           "C_window_bounded_stream": {
-            "allowed_lateness_hours": 240.0,
+            "allowed_lateness_hours": -1.0,
             "window_hours": 24.0
           },
           "D_log_consistent_htap": {
@@ -225,7 +225,7 @@
             "open_reconcile_every_hours": 168.0
           },
           "C_window_bounded_stream": {
-            "allowed_lateness_hours": 240.0,
+            "allowed_lateness_hours": -1.0,
             "window_hours": 24.0
           },
           "D_log_consistent_htap": {
@@ -250,8 +250,8 @@
             "open_reconcile_every_hours": 0.166667
           },
           "C_window_bounded_stream": {
-            "allowed_lateness_hours": 1080.0,
-            "window_hours": 0.1
+            "allowed_lateness_hours": -1.0,
+            "window_hours": 0.25
           },
           "D_log_consistent_htap": {
             "htap_commit_every_hours": 0.166667

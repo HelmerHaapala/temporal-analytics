@@ -8,6 +8,7 @@ import duckdb
 import pandas as pd
 
 from measures import capture_measure_snapshots
+from ._row_load_tracking import record_row_loads
 from ._shared_sql import EVENT_COLUMNS_SQL, EVENT_SCHEMA_SQL, observed_events_sql
 
 
@@ -28,6 +29,7 @@ class OpenEvolvingStream:
         self.table_name = "served_state"
         self.processing_time_seconds = 0.0
         self.rows_loaded_count = 0
+        self.row_load_counts: dict[int, int] = {}
         self.freshness_cutoff_time: Optional[pd.Timestamp] = None
         self._init_tables()
 
@@ -113,6 +115,7 @@ class OpenEvolvingStream:
                             """
                         )
                         self.rows_loaded_count += int(len(latest_visible_df))
+                        record_row_loads(self.row_load_counts, latest_visible_df)
                     finally:
                         self.conn.unregister("latest_visible_df")
             finally:
@@ -128,8 +131,7 @@ class OpenEvolvingStream:
         if self.last_reconciled_visible_cutoff is not None and visible_cutoff <= self.last_reconciled_visible_cutoff:
             return
         if self.next_reconcile_time is None:
-            self.next_reconcile_time = current_time + self.reconcile_every
-            return
+            self.next_reconcile_time = current_time
         if current_time < self.next_reconcile_time:
             return
 
@@ -157,6 +159,7 @@ class OpenEvolvingStream:
                 """
             )
             self.rows_loaded_count += int(n_rows)
+            record_row_loads(self.row_load_counts, staged_events)
         finally:
             self.conn.unregister(temp_view)
         batch_arrival_time = pd.Timestamp(staged_events["arrival_time"].max())

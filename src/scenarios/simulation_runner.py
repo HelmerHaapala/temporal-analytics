@@ -8,6 +8,7 @@ import queue as queue_module
 import json
 import os
 from pathlib import Path
+from datetime import datetime
 
 import pandas as pd
 
@@ -130,6 +131,8 @@ def _normalize_scenario_params(raw_params_by_arch: dict) -> dict:
         raw_arch = raw_params_by_arch.get(arch_name, {})
         if isinstance(raw_arch, dict):
             base.update(raw_arch)
+        if arch_name == "C_window_bounded_stream":
+            base["allowed_lateness_hours"] = -1.0
         normalized[arch_name] = base
     return normalized
 
@@ -195,6 +198,28 @@ def _append_derived_metrics(
         augmented["stability_headroom_ratio"] = None
 
     return augmented
+
+
+def _source_row_lookup(
+    source_conn,
+    source_table: str,
+) -> pd.DataFrame:
+    source_rows = source_conn.execute(
+        f"""
+        SELECT event_id
+        FROM {source_table}
+        ORDER BY arrival_time, event_id
+        """
+    ).df()
+    if source_rows.empty:
+        return pd.DataFrame(columns=["event_id", "source_row_number"])
+    lookup = source_rows.copy().reset_index(drop=True)
+    lookup["source_row_number"] = lookup.index + 1
+    lookup["event_id"] = pd.to_numeric(lookup["event_id"], errors="coerce").astype("Int64")
+    lookup = lookup.dropna(subset=["event_id"]).copy()
+    lookup["event_id"] = lookup["event_id"].astype(int)
+    lookup["source_row_number"] = lookup["source_row_number"].astype(int)
+    return lookup[["event_id", "source_row_number"]]
 
 
 def _parallel_worker_count() -> int:
@@ -280,7 +305,7 @@ def _run_selected_scenario_worker(
                     "architecture": arch_name,
                 }
             )
-    snapshots_df, outcomes_df = run_scenario_with_params(
+    snapshots_df, outcomes_df, row_loads_df = run_scenario_with_params(
         scenario=scenario,
         source_table=source_table,
         selected_params_by_arch=selected_params_by_arch,
@@ -293,6 +318,7 @@ def _run_selected_scenario_worker(
         "scenario_id": scenario.scenario_id,
         "snapshots_df": snapshots_df,
         "outcomes_df": outcomes_df,
+        "row_loads_df": row_loads_df,
     }
 
 
@@ -330,10 +356,24 @@ def _materialize_source_db(
     source_conn,
     source_db_path: Path,
     table_names: list[str],
-) -> None:
-    if source_db_path.exists():
-        source_db_path.unlink()
-    escaped_path = str(source_db_path).replace("'", "''")
+) -> Path:
+    materialized_db_path = source_db_path
+    if materialized_db_path.exists():
+        try:
+            materialized_db_path.unlink()
+        except PermissionError:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            materialized_db_path = (
+                source_db_path.parent
+                / f"{source_db_path.stem}_{os.getpid()}_{timestamp}{source_db_path.suffix}"
+            )
+            print(
+                "Source database file is locked; using alternate path for this run: "
+                f"{materialized_db_path}"
+            )
+    if materialized_db_path.exists():
+        materialized_db_path.unlink()
+    escaped_path = str(materialized_db_path).replace("'", "''")
     source_conn.execute(f"ATTACH '{escaped_path}' AS source_db_file")
     try:
         for table_name in table_names:
@@ -345,6 +385,7 @@ def _materialize_source_db(
             )
     finally:
         source_conn.execute("DETACH source_db_file")
+    return materialized_db_path
 
 
 def _print_baseline_parameters(selected_params_by_arch: dict) -> None:
@@ -369,7 +410,7 @@ def _run_selected_scenarios(
     source_table: str,
     source_db_path: Path,
     parallel_workers: int,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     scenario_workers, architecture_workers = _hybrid_worker_counts(
         total_workers=parallel_workers,
         scenario_count=len(scenario_runs),
@@ -382,6 +423,7 @@ def _run_selected_scenarios(
 
     snapshots_parts = []
     outcomes_parts = []
+    row_load_parts = []
     by_scenario = {}
     status_grid = {
         str(scenario.scenario_id): {arch_name: "..." for arch_name in ARCHITECTURE_ORDER}
@@ -451,10 +493,15 @@ def _run_selected_scenarios(
         by_scenario[str(scenario.scenario_id)]["outcomes_df"]
         for scenario, _ in scenario_runs
     )
+    row_load_parts.extend(
+        by_scenario[str(scenario.scenario_id)]["row_loads_df"]
+        for scenario, _ in scenario_runs
+    )
 
     return (
         pd.concat(snapshots_parts, ignore_index=True),
         pd.concat(outcomes_parts, ignore_index=True),
+        pd.concat(row_load_parts, ignore_index=True),
     )
 
 
@@ -495,167 +542,184 @@ def run_scenarios(
         seed=seed,
     )
     source_conn, _ = generator.create_source_table(table_name="events_source")
-    baseline_params_by_arch = _baseline_params_by_arch(effective_time_span)
-    source_csv_path = RESULTS_DIR / "scenarios_events_source.csv"
-    source_conn.execute("SELECT * FROM events_source").df().to_csv(source_csv_path, index=False)
-    total_rows = int(source_conn.execute("SELECT COUNT(*) FROM events_source").fetchone()[0])
-    source_db_path = DATABASES_DIR / "scenarios_source.duckdb"
-    _materialize_source_db(
-        source_conn=source_conn,
-        source_db_path=source_db_path,
-        table_names=["events_source"],
-    )
-    params_path = PARAMETERS_DIR / "baseline_params.json"
-    params_for_reporting = _baseline_params_for_reporting(baseline_params_by_arch)
-    params_path.write_text(
-        json.dumps(params_for_reporting, indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
-    print(f"Saved simulation source database: {source_db_path}")
-    print(f"Anchored baseline parameters to source time span: {effective_time_span} days")
-    print(f"Saved baseline parameters: {params_path}")
-    _print_baseline_parameters(baseline_params_by_arch)
-
-    tuned_params_path = PARAMETERS_DIR / "scenarios_tuned_params.json"
-    tuned_params_cache = {}
-    tuned_params_by_scenario = {}
-    if tuned_params_path.exists():
-        try:
-            tuned_params_cache = _load_tuned_params_cache(tuned_params_path)
-            profile_payload = tuned_params_cache.get(profile_key, {})
-            tuned_params_by_scenario = dict(profile_payload.get("scenarios", {}))
-            if tuned_params_by_scenario:
-                print(
-                    "\nUsing cached tuned parameters from "
-                    f"{tuned_params_path} for {profile_key}"
-                )
-        except (json.JSONDecodeError, OSError) as exc:
-            print(f"\nFailed to read tuned-parameter cache ({exc}); running tuning.")
-            tuned_params_cache = {}
-            tuned_params_by_scenario = {}
-
-    missing_scenario_ids = [
-        scenario.scenario_id
-        for scenario in BUSINESS_SCENARIOS
-        if not _has_complete_cached_architecture_params(
-            tuned_params_by_scenario.get(scenario.scenario_id, {})
+    try:
+        baseline_params_by_arch = _baseline_params_by_arch(effective_time_span)
+        source_csv_path = RESULTS_DIR / "scenarios_events_source.csv"
+        source_conn.execute("SELECT * FROM events_source").df().to_csv(source_csv_path, index=False)
+        total_rows = int(source_conn.execute("SELECT COUNT(*) FROM events_source").fetchone()[0])
+        source_db_path = DATABASES_DIR / "scenarios_source.duckdb"
+        source_db_path = _materialize_source_db(
+            source_conn=source_conn,
+            source_db_path=source_db_path,
+            table_names=["events_source"],
         )
-    ]
+        params_path = PARAMETERS_DIR / "baseline_params.json"
+        params_for_reporting = _baseline_params_for_reporting(baseline_params_by_arch)
+        params_path.write_text(
+            json.dumps(params_for_reporting, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        print(f"Saved simulation source database: {source_db_path}")
+        print(f"Anchored baseline parameters to source time span: {effective_time_span} days")
+        print(f"Saved baseline parameters: {params_path}")
+        _print_baseline_parameters(baseline_params_by_arch)
 
-    if missing_scenario_ids:
-        print("\nTuning architecture parameters for business scenarios...")
-        scenarios_to_tune = [
-            scenario
+        tuned_params_path = PARAMETERS_DIR / "scenarios_tuned_params.json"
+        tuned_params_cache = {}
+        tuned_params_by_scenario = {}
+        if tuned_params_path.exists():
+            try:
+                tuned_params_cache = _load_tuned_params_cache(tuned_params_path)
+                profile_payload = tuned_params_cache.get(profile_key, {})
+                tuned_params_by_scenario = dict(profile_payload.get("scenarios", {}))
+                if tuned_params_by_scenario:
+                    print(
+                        "\nUsing cached tuned parameters from "
+                        f"{tuned_params_path} for {profile_key}"
+                    )
+            except (json.JSONDecodeError, OSError) as exc:
+                print(f"\nFailed to read tuned-parameter cache ({exc}); running tuning.")
+                tuned_params_cache = {}
+                tuned_params_by_scenario = {}
+
+        missing_scenario_ids = [
+            scenario.scenario_id
             for scenario in BUSINESS_SCENARIOS
-            if scenario.scenario_id in missing_scenario_ids
+            if not _has_complete_cached_architecture_params(
+                tuned_params_by_scenario.get(scenario.scenario_id, {})
+            )
         ]
-        scenario_workers, architecture_workers = _hybrid_worker_counts(
-            total_workers=parallel_workers,
-            scenario_count=len(scenarios_to_tune),
-        )
-        print(
-            "Using tuning mode: full-data, direct-freshness-where-available, "
-            "slowest-candidate-first-for-remaining-search, "
-            f"scenario_workers={scenario_workers}, "
-            f"architecture_workers={architecture_workers}"
-        )
 
-        status_grid = {
-            str(scenario.scenario_id): {arch_name: "..." for arch_name in ARCHITECTURE_ORDER}
-            for scenario in scenarios_to_tune
-        }
-        table_line_count = _print_status_table(
-            _render_status_lines("Tuning status:", scenarios_to_tune, status_grid),
-            previous_line_count=0,
-        )
+        if missing_scenario_ids:
+            print("\nTuning architecture parameters for business scenarios...")
+            scenarios_to_tune = [
+                scenario
+                for scenario in BUSINESS_SCENARIOS
+                if scenario.scenario_id in missing_scenario_ids
+            ]
+            scenario_workers, architecture_workers = _hybrid_worker_counts(
+                total_workers=parallel_workers,
+                scenario_count=len(scenarios_to_tune),
+            )
+            print(
+                "Using tuning mode: full-data, direct-freshness-where-available, "
+                "slowest-candidate-first-for-remaining-search, "
+                f"scenario_workers={scenario_workers}, "
+                f"architecture_workers={architecture_workers}"
+            )
 
-        def update_status(scenario_id: str, arch_name: str, met_target: bool) -> None:
-            if scenario_id not in status_grid or arch_name not in status_grid[scenario_id]:
-                return
-            status_grid[scenario_id][arch_name] = "PASS" if met_target else "FAIL"
+            status_grid = {
+                str(scenario.scenario_id): {arch_name: "..." for arch_name in ARCHITECTURE_ORDER}
+                for scenario in scenarios_to_tune
+            }
+            table_line_count = _print_status_table(
+                _render_status_lines("Tuning status:", scenarios_to_tune, status_grid),
+                previous_line_count=0,
+            )
 
-        by_scenario = {}
-        with Manager() as manager:
-            progress_queue = manager.Queue()
-            with ProcessPoolExecutor(max_workers=scenario_workers) as executor:
-                future_by_scenario = {
-                    executor.submit(
-                        _tune_single_scenario_worker,
-                        scenario,
-                        str(source_db_path),
-                        "events_source",
-                        architecture_workers,
-                        progress_queue,
-                    ): scenario.scenario_id
-                    for scenario in scenarios_to_tune
-                }
-                pending = set(future_by_scenario.keys())
-                while pending:
-                    table_dirty = False
-                    while True:
-                        try:
-                            event = progress_queue.get(timeout=0.05)
-                        except queue_module.Empty:
-                            break
-                        update_status(
-                            scenario_id=str(event.get("scenario_id")),
-                            arch_name=str(event.get("architecture")),
-                            met_target=bool(event.get("met_target")),
-                        )
-                        table_dirty = True
-                    done_now = [future for future in list(pending) if future.done()]
-                    for future in done_now:
-                        pending.remove(future)
-                        item = future.result()
-                        by_scenario[str(item["scenario_id"])] = item
-                        for arch_name, met_target in dict(item.get("met_target_by_arch", {})).items():
+            def update_status(scenario_id: str, arch_name: str, met_target: bool) -> None:
+                if scenario_id not in status_grid or arch_name not in status_grid[scenario_id]:
+                    return
+                status_grid[scenario_id][arch_name] = "PASS" if met_target else "FAIL"
+
+            by_scenario = {}
+            with Manager() as manager:
+                progress_queue = manager.Queue()
+                with ProcessPoolExecutor(max_workers=scenario_workers) as executor:
+                    future_by_scenario = {
+                        executor.submit(
+                            _tune_single_scenario_worker,
+                            scenario,
+                            str(source_db_path),
+                            "events_source",
+                            architecture_workers,
+                            progress_queue,
+                        ): scenario.scenario_id
+                        for scenario in scenarios_to_tune
+                    }
+                    pending = set(future_by_scenario.keys())
+                    while pending:
+                        table_dirty = False
+                        while True:
+                            try:
+                                event = progress_queue.get(timeout=0.05)
+                            except queue_module.Empty:
+                                break
                             update_status(
-                                scenario_id=str(item["scenario_id"]),
-                                arch_name=str(arch_name),
-                                met_target=bool(met_target),
+                                scenario_id=str(event.get("scenario_id")),
+                                arch_name=str(event.get("architecture")),
+                                met_target=bool(event.get("met_target")),
                             )
                             table_dirty = True
-                    if table_dirty:
-                        table_line_count = _print_status_table(
-                            _render_status_lines("Tuning status:", scenarios_to_tune, status_grid),
-                            previous_line_count=table_line_count,
-                        )
+                        done_now = [future for future in list(pending) if future.done()]
+                        for future in done_now:
+                            pending.remove(future)
+                            item = future.result()
+                            by_scenario[str(item["scenario_id"])] = item
+                            for arch_name, met_target in dict(item.get("met_target_by_arch", {})).items():
+                                update_status(
+                                    scenario_id=str(item["scenario_id"]),
+                                    arch_name=str(arch_name),
+                                    met_target=bool(met_target),
+                                )
+                                table_dirty = True
+                        if table_dirty:
+                            table_line_count = _print_status_table(
+                                _render_status_lines("Tuning status:", scenarios_to_tune, status_grid),
+                                previous_line_count=table_line_count,
+                            )
 
-        for scenario in scenarios_to_tune:
-            scenario_id = scenario.scenario_id
-            item = by_scenario.get(scenario_id)
-            if item is None:
-                continue
-            tuned_params_by_scenario[scenario_id] = dict(item["raw_arch_params"])
-        tuned_params_cache[profile_key] = {
-            "simulation_parameters": simulation_parameters,
-            "scenarios": tuned_params_by_scenario,
-        }
-        _save_tuned_params_cache(tuned_params_path, tuned_params_cache)
-        print(f"Saved tuned parameters to: {tuned_params_path} ({profile_key})")
+            for scenario in scenarios_to_tune:
+                scenario_id = scenario.scenario_id
+                item = by_scenario.get(scenario_id)
+                if item is None:
+                    continue
+                tuned_params_by_scenario[scenario_id] = dict(item["raw_arch_params"])
+            tuned_params_cache[profile_key] = {
+                "simulation_parameters": simulation_parameters,
+                "scenarios": tuned_params_by_scenario,
+            }
+            _save_tuned_params_cache(tuned_params_path, tuned_params_cache)
+            print(f"Saved tuned parameters to: {tuned_params_path} ({profile_key})")
 
-    print("\nPreparing scenario execution set...")
-    scenario_runs = [(BASELINE_SCENARIO, baseline_params_by_arch)]
-    for scenario in BUSINESS_SCENARIOS:
-        raw_arch_params = tuned_params_by_scenario.get(scenario.scenario_id, {})
-        selected_params_by_arch = _normalize_scenario_params(raw_arch_params)
-        scenario_runs.append((scenario, selected_params_by_arch))
+        print("\nPreparing scenario execution set...")
+        scenario_runs = [(BASELINE_SCENARIO, baseline_params_by_arch)]
+        for scenario in BUSINESS_SCENARIOS:
+            raw_arch_params = tuned_params_by_scenario.get(scenario.scenario_id, {})
+            selected_params_by_arch = _normalize_scenario_params(raw_arch_params)
+            scenario_runs.append((scenario, selected_params_by_arch))
 
-    snapshots_result, outcomes_result = _run_selected_scenarios(
-        scenario_runs=scenario_runs,
-        source_table="events_source",
-        source_db_path=source_db_path,
-        parallel_workers=parallel_workers,
-    )
-    snapshots_result["run_type"] = SCENARIOS_RUN_TYPE
-    outcomes_result["run_type"] = SCENARIOS_RUN_TYPE
-    outcomes_result = _append_derived_metrics(outcomes_result, source_row_count=total_rows)
+        snapshots_result, outcomes_result, row_loads_result = _run_selected_scenarios(
+            scenario_runs=scenario_runs,
+            source_table="events_source",
+            source_db_path=source_db_path,
+            parallel_workers=parallel_workers,
+        )
+        snapshots_result["run_type"] = SCENARIOS_RUN_TYPE
+        outcomes_result["run_type"] = SCENARIOS_RUN_TYPE
+        row_loads_result["run_type"] = SCENARIOS_RUN_TYPE
+        row_loads_result["event_id"] = pd.to_numeric(row_loads_result["event_id"], errors="coerce")
+        row_loads_result["load_count"] = pd.to_numeric(row_loads_result["load_count"], errors="coerce")
+        row_loads_result = row_loads_result.dropna(subset=["event_id", "load_count"]).copy()
+        row_loads_result["event_id"] = row_loads_result["event_id"].astype(int)
+        row_loads_result["load_count"] = row_loads_result["load_count"].astype(int)
+        row_lookup = _source_row_lookup(source_conn=source_conn, source_table="events_source")
+        row_loads_result = row_loads_result.merge(row_lookup, on="event_id", how="left")
+        row_loads_result = row_loads_result[
+            ["scenario", "architecture", "event_id", "source_row_number", "load_count", "run_type"]
+        ].sort_values(["scenario", "architecture", "source_row_number", "event_id"]).reset_index(drop=True)
+        outcomes_result = _append_derived_metrics(outcomes_result, source_row_count=total_rows)
 
-    snapshots_path = RESULTS_DIR / "scenarios_snapshots.csv"
-    outcomes_path = RESULTS_DIR / "scenarios_outcomes.csv"
-    snapshots_result.to_csv(snapshots_path, index=False)
-    outcomes_result.to_csv(outcomes_path, index=False)
+        snapshots_path = RESULTS_DIR / "scenarios_snapshots.csv"
+        outcomes_path = RESULTS_DIR / "scenarios_outcomes.csv"
+        row_loads_path = RESULTS_DIR / "scenarios_row_loads.csv"
+        snapshots_result.to_csv(snapshots_path, index=False)
+        outcomes_result.to_csv(outcomes_path, index=False)
+        row_loads_result.to_csv(row_loads_path, index=False)
 
-    print(f"\nSaved snapshots: {snapshots_path}")
-    print(f"Saved outcomes:  {outcomes_path}")
-    return snapshots_result, outcomes_result
+        print(f"\nSaved snapshots: {snapshots_path}")
+        print(f"Saved outcomes:  {outcomes_path}")
+        print(f"Saved row loads:{row_loads_path}")
+        return snapshots_result, outcomes_result
+    finally:
+        source_conn.close()

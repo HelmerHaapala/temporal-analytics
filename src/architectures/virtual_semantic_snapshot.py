@@ -9,7 +9,7 @@ import pandas as pd
 
 from measures import capture_measure_snapshots
 from ._row_load_tracking import record_row_loads
-from ._shared_sql import EVENT_COLUMNS_SQL, EVENT_SCHEMA_SQL, observed_events_sql
+from ._shared_sql import EVENT_COLUMNS_SQL, EVENT_SCHEMA_SQL
 
 
 class VirtualSemanticSnapshot:
@@ -30,51 +30,60 @@ class VirtualSemanticSnapshot:
     def _init_tables(self) -> None:
         self.conn.execute(
             f"""
-            CREATE TABLE raw_events (
+            CREATE TABLE {self.table_name} (
             {EVENT_SCHEMA_SQL}
             )
             """
         )
 
-        self.conn.execute(
-            """
-            CREATE TABLE semantic_control (
-                snapshot_cutoff TIMESTAMP
-            )
-            """
-        )
-
-        self.conn.execute(
-            """
-            INSERT INTO semantic_control VALUES (TIMESTAMP '1900-01-01')
-            """
-        )
-
-        cutoff_expr = "(SELECT snapshot_cutoff FROM semantic_control LIMIT 1)"
-
-        self.conn.execute(
+    def _refresh_semantic_snapshot(
+        self,
+        source_conn: duckdb.DuckDBPyConnection,
+        source_table: str,
+        snapshot_cutoff: pd.Timestamp,
+    ) -> int:
+        snapshot_df = source_conn.execute(
             f"""
-            CREATE VIEW {self.table_name} AS
             SELECT
                 {EVENT_COLUMNS_SQL}
             FROM (
                 SELECT
-                    *,
+                    {EVENT_COLUMNS_SQL},
                     ROW_NUMBER() OVER (
                         PARTITION BY sale_id
                         ORDER BY arrival_time DESC, event_id DESC
                     ) AS rn
-                FROM raw_events
-                WHERE arrival_time <= {cutoff_expr}
+                FROM {source_table}
+                WHERE arrival_time <= ?
             ) ranked
             WHERE rn = 1 AND is_deleted = FALSE
-            """
-        )
+            """,
+            [snapshot_cutoff],
+        ).df()
 
-    def _set_snapshot_cutoff(self, cutoff_time: pd.Timestamp) -> None:
-        self.conn.execute("DELETE FROM semantic_control")
-        self.conn.execute("INSERT INTO semantic_control VALUES (?)", [cutoff_time])
-        self.freshness_cutoff_time = pd.Timestamp(cutoff_time)
+        self.conn.execute(f"DELETE FROM {self.table_name}")
+        if snapshot_df.empty:
+            self.freshness_cutoff_time = pd.Timestamp(snapshot_cutoff)
+            return 0
+
+        self.conn.register("semantic_snapshot_df", snapshot_df)
+        try:
+            self.conn.execute(
+                f"""
+                INSERT INTO {self.table_name}
+                SELECT
+                    {EVENT_COLUMNS_SQL}
+                FROM semantic_snapshot_df
+                """
+            )
+        finally:
+            self.conn.unregister("semantic_snapshot_df")
+
+        visible_row_count = int(len(snapshot_df))
+        self.rows_loaded_count += visible_row_count
+        record_row_loads(self.row_load_counts, snapshot_df)
+        self.freshness_cutoff_time = pd.Timestamp(snapshot_cutoff)
+        return visible_row_count
 
     def process_source(
         self,
@@ -86,40 +95,29 @@ class VirtualSemanticSnapshot:
         start_time = perf_counter()
 
         try:
-            observed_events = source_conn.execute(observed_events_sql(source_table)).df()
-            if observed_events.empty:
+            min_arrival = source_conn.execute(
+                f"SELECT MIN(arrival_time) FROM {source_table}"
+            ).fetchone()[0]
+            max_arrival = source_conn.execute(
+                f"SELECT MAX(arrival_time) FROM {source_table}"
+            ).fetchone()[0]
+            if min_arrival is None or max_arrival is None:
                 return []
 
-            self.conn.register("observed_events_df", observed_events)
-            try:
-                self.conn.execute(
-                    f"""
-                    INSERT INTO raw_events
-                    SELECT
-                        {EVENT_COLUMNS_SQL}
-                    FROM observed_events_df
-                    """
-                )
-                self.rows_loaded_count += int(len(observed_events))
-                record_row_loads(self.row_load_counts, observed_events)
-            finally:
-                self.conn.unregister("observed_events_df")
-
-            min_arrival = pd.Timestamp(observed_events["arrival_time"].min())
-            max_arrival = pd.Timestamp(observed_events["arrival_time"].max())
+            min_arrival = pd.Timestamp(min_arrival)
+            max_arrival = pd.Timestamp(max_arrival)
             refresh_interval = pd.Timedelta(hours=self.semantic_refresh_hours)
 
             snapshots: list[dict] = []
             snapshot_cutoff = min_arrival
             while snapshot_cutoff <= max_arrival:
-                self._set_snapshot_cutoff(snapshot_cutoff)
-
-                event_count = self.conn.execute(
-                    """
-                    SELECT COUNT(*)
-                    FROM raw_events
-                    WHERE arrival_time <= ?
-                    """,
+                self._refresh_semantic_snapshot(
+                    source_conn=source_conn,
+                    source_table=source_table,
+                    snapshot_cutoff=snapshot_cutoff,
+                )
+                event_count = source_conn.execute(
+                    f"SELECT COUNT(*) FROM {source_table} WHERE arrival_time <= ?",
                     [snapshot_cutoff],
                 ).fetchone()[0]
 
